@@ -14,7 +14,7 @@ from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 import warnings
 warnings.filterwarnings('ignore')
 
-class MedicalEnsemble:
+class EnsembleMedico:
     """
     Ensemble de CNNs para Diagnóstico Médico
     
@@ -27,7 +27,7 @@ class MedicalEnsemble:
     
     def __init__(self):
         # Mapeo de clases (igual que tu código original)
-        self.class_info = {
+        self.informacion_clases = {
             'Central Serous Chorioretinopathy [Color Fundus]': {
                 'nombre': 'Corioretinopatía Serosa Central',
                 'descripcion': 'Acumulación de líquido bajo la retina que causa visión borrosa'
@@ -71,10 +71,10 @@ class MedicalEnsemble:
         }
         
         # Configuración
-        self.img_height = 224
-        self.img_width = 224
-        self.batch_size = 32
-        self.validation_split = 0.2
+        self.alto_img = 224
+        self.ancho_img = 224
+        self.tamaño_lote = 32
+        self.division_validacion = 0.2
         
         print("🤖 ENSEMBLE MÉDICO DE CNNs")
         print("=" * 50)
@@ -84,11 +84,11 @@ class MedicalEnsemble:
         print("   🔗 ResNet50V2    - Residual connections profundas")
         print("=" * 50)
     
-    def prepare_data(self, dataset_path):
+    def preparar_datos(self, ruta_dataset):
         """Prepara datos para ensemble (igual que tu código)"""
         print("🔄 Preparando datos para Ensemble...")
         
-        train_datagen = ImageDataGenerator(
+        generador_datos_entrenamiento = ImageDataGenerator(
             rescale=1./255,
             rotation_range=25,
             width_shift_range=0.15,
@@ -98,90 +98,90 @@ class MedicalEnsemble:
             horizontal_flip=True,
             brightness_range=[0.8, 1.2],
             fill_mode='nearest',
-            validation_split=self.validation_split
+            validation_split=self.division_validacion
         )
         
-        val_datagen = ImageDataGenerator(
+        generador_datos_validacion = ImageDataGenerator(
             rescale=1./255,
-            validation_split=self.validation_split
+            validation_split=self.division_validacion
         )
         
-        train_generator = train_datagen.flow_from_directory(
-            dataset_path,
-            target_size=(self.img_height, self.img_width),
-            batch_size=self.batch_size,
+        generador_entrenamiento = generador_datos_entrenamiento.flow_from_directory(
+            ruta_dataset,
+            target_size=(self.alto_img, self.ancho_img),
+            batch_size=self.tamaño_lote,
             class_mode='categorical',
             subset='training',
             shuffle=True
         )
         
-        validation_generator = val_datagen.flow_from_directory(
-            dataset_path,
-            target_size=(self.img_height, self.img_width),
-            batch_size=self.batch_size,
+        generador_validacion = generador_datos_validacion.flow_from_directory(
+            ruta_dataset,
+            target_size=(self.alto_img, self.ancho_img),
+            batch_size=self.tamaño_lote,
             class_mode='categorical',
             subset='validation',
             shuffle=False
         )
         
-        print(f"✅ Datos entrenamiento: {train_generator.samples}")
-        print(f"✅ Datos validación: {validation_generator.samples}")
+        print(f"✅ Datos entrenamiento: {generador_entrenamiento.samples}")
+        print(f"✅ Datos validación: {generador_validacion.samples}")
         
-        return train_generator, validation_generator
+        return generador_entrenamiento, generador_validacion
     
-    def create_individual_model(self, architecture, num_classes, model_name):
+    def crear_modelo_individual(self, arquitectura, num_clases, nombre_modelo):
         """Crea modelo individual según arquitectura"""
-        print(f"🏗️ Creando modelo {architecture}...")
+        print(f"🏗️ Creando modelo {arquitectura}...")
         
-        if architecture == 'mobilenet':
-            base_model = MobileNetV2(
+        if arquitectura == 'mobilenet':
+            modelo_base = MobileNetV2(
                 weights='imagenet',
                 include_top=False,
-                input_shape=(self.img_height, self.img_width, 3)
+                input_shape=(self.alto_img, self.ancho_img, 3)
             )
             # Fine-tuning específico para MobileNet
-            base_model.trainable = True
-            for layer in base_model.layers[:-20]:
-                layer.trainable = False
+            modelo_base.trainable = True
+            for capa in modelo_base.layers[:-20]:
+                capa.trainable = False
                 
-        elif architecture == 'efficientnet':
-            base_model = EfficientNetB0(
+        elif arquitectura == 'efficientnet':
+            modelo_base = EfficientNetB0(
                 weights='imagenet',
                 include_top=False,
-                input_shape=(self.img_height, self.img_width, 3)
+                input_shape=(self.alto_img, self.ancho_img, 3)
             )
             # Fine-tuning específico para EfficientNet
-            base_model.trainable = True
-            for layer in base_model.layers[:-15]:
-                layer.trainable = False
+            modelo_base.trainable = True
+            for capa in modelo_base.layers[:-15]:
+                capa.trainable = False
                 
-        elif architecture == 'resnet':
-            base_model = ResNet50V2(
+        elif arquitectura == 'resnet':
+            modelo_base = ResNet50V2(
                 weights='imagenet',
                 include_top=False,
-                input_shape=(self.img_height, self.img_width, 3)
+                input_shape=(self.alto_img, self.ancho_img, 3)
             )
             # Fine-tuning específico para ResNet
-            base_model.trainable = True
-            for layer in base_model.layers[:-25]:
-                layer.trainable = False
+            modelo_base.trainable = True
+            for capa in modelo_base.layers[:-25]:
+                capa.trainable = False
         
         # Capas superiores específicas por arquitectura
-        x = base_model.output
+        x = modelo_base.output
         x = layers.GlobalAveragePooling2D()(x)
         
         # Configuración específica por modelo
-        if architecture == 'mobilenet':
+        if arquitectura == 'mobilenet':
             x = layers.Dropout(0.3)(x)
             x = layers.Dense(128, activation='relu')(x)
             x = layers.BatchNormalization()(x)
             x = layers.Dropout(0.2)(x)
-        elif architecture == 'efficientnet':
+        elif arquitectura == 'efficientnet':
             x = layers.Dropout(0.4)(x)
             x = layers.Dense(256, activation='relu')(x)
             x = layers.BatchNormalization()(x)
             x = layers.Dropout(0.3)(x)
-        elif architecture == 'resnet':
+        elif arquitectura == 'resnet':
             x = layers.Dropout(0.4)(x)
             x = layers.Dense(512, activation='relu')(x)
             x = layers.Dropout(0.3)(x)
@@ -189,30 +189,30 @@ class MedicalEnsemble:
             x = layers.Dropout(0.2)(x)
         
         # Salida
-        predictions = layers.Dense(num_classes, activation='softmax', name='predictions')(x)
+        predicciones = layers.Dense(num_clases, activation='softmax', name='predictions')(x)
         
-        model = Model(inputs=base_model.input, outputs=predictions, name=model_name)
+        modelo = Model(inputs=modelo_base.input, outputs=predicciones, name=nombre_modelo)
         
         # Compilar con configuración específica
-        if architecture == 'mobilenet':
-            lr = 0.0001
-        elif architecture == 'efficientnet':
-            lr = 0.00005  # Más conservador
+        if arquitectura == 'mobilenet':
+            tasa_aprendizaje = 0.0001
+        elif arquitectura == 'efficientnet':
+            tasa_aprendizaje = 0.00005  # Más conservador
         else:  # resnet
-            lr = 0.0002   # Más agresivo
+            tasa_aprendizaje = 0.0002   # Más agresivo
             
-        model.compile(
-            optimizer=Adam(learning_rate=lr),
+        modelo.compile(
+            optimizer=Adam(learning_rate=tasa_aprendizaje),
             loss='categorical_crossentropy',
             metrics=['accuracy', 'top_k_categorical_accuracy']
         )
         
-        print(f"✅ {architecture} creado: {model.count_params():,} parámetros")
-        return model
+        print(f"✅ {arquitectura} creado: {modelo.count_params():,} parámetros")
+        return modelo
     
-    def train_individual_model(self, model, architecture, train_gen, val_gen, epochs=25):
+    def entrenar_modelo_individual(self, modelo, arquitectura, gen_entrenamiento, gen_validacion, epocas=25):
         """Entrena un modelo individual"""
-        print(f"\n🚀 ENTRENANDO {architecture.upper()}...")
+        print(f"\n🚀 ENTRENANDO {arquitectura.upper()}...")
         print("=" * 40)
         
         # Callbacks específicos
@@ -231,7 +231,7 @@ class MedicalEnsemble:
                 verbose=1
             ),
             ModelCheckpoint(
-                f'{architecture}_individual_model.h5',
+                f'{arquitectura}_individual_model.h5',
                 monitor='val_accuracy',
                 save_best_only=True,
                 verbose=1
@@ -239,109 +239,109 @@ class MedicalEnsemble:
         ]
         
         # Entrenar
-        history = model.fit(
-            train_gen,
-            epochs=epochs,
-            validation_data=val_gen,
+        historial = modelo.fit(
+            gen_entrenamiento,
+            epochs=epocas,
+            validation_data=gen_validacion,
             callbacks=callbacks,
             verbose=1
         )
         
         # Métricas finales
-        final_acc = max(history.history['val_accuracy'])
-        print(f"✅ {architecture} completado - Mejor accuracy: {final_acc:.4f}")
+        precision_final = max(historial.history['val_accuracy'])
+        print(f"✅ {arquitectura} completado - Mejor accuracy: {precision_final:.4f}")
         
-        return model, history, final_acc
+        return modelo, historial, precision_final
     
-    def create_ensemble_predictor(self, models, weights=None):
+    def crear_predictor_ensemble(self, modelos, pesos=None):
         """Crea función de ensemble para combinar predicciones"""
-        if weights is None:
-            weights = [1/len(models)] * len(models)  # Pesos iguales
+        if pesos is None:
+            pesos = [1/len(modelos)] * len(modelos)  # Pesos iguales
         
-        def ensemble_predict(x):
-            predictions = []
-            for model in models:
-                pred = model.predict(x, verbose=0)
-                predictions.append(pred)
+        def prediccion_ensemble(x):
+            predicciones = []
+            for modelo in modelos:
+                pred = modelo.predict(x, verbose=0)
+                predicciones.append(pred)
             
             # Promedio ponderado
-            ensemble_pred = np.zeros_like(predictions[0])
-            for i, pred in enumerate(predictions):
-                ensemble_pred += weights[i] * pred
+            prediccion_ensemble_final = np.zeros_like(predicciones[0])
+            for i, pred in enumerate(predicciones):
+                prediccion_ensemble_final += pesos[i] * pred
                 
-            return ensemble_pred
+            return prediccion_ensemble_final
         
-        return ensemble_predict
+        return prediccion_ensemble
     
-    def evaluate_ensemble(self, models, val_gen, weights=None):
+    def evaluar_ensemble(self, modelos, gen_validacion, pesos=None):
         """Evalúa ensemble completo"""
         print("\n🔬 EVALUANDO ENSEMBLE COMPLETO...")
         print("=" * 50)
         
         # Crear predictor ensemble
-        ensemble_predict = self.create_ensemble_predictor(models, weights)
+        prediccion_ensemble = self.crear_predictor_ensemble(modelos, pesos)
         
         # Obtener predicciones ensemble
-        val_gen.reset()
-        ensemble_predictions = ensemble_predict(val_gen)
-        predicted_classes = np.argmax(ensemble_predictions, axis=1)
+        gen_validacion.reset()
+        predicciones_ensemble = prediccion_ensemble(gen_validacion)
+        clases_predichas = np.argmax(predicciones_ensemble, axis=1)
         
         # Etiquetas verdaderas
-        true_classes = val_gen.classes
-        class_labels = list(val_gen.class_indices.keys())
+        clases_verdaderas = gen_validacion.classes
+        etiquetas_clases = list(gen_validacion.class_indices.keys())
         
         # Reporte de clasificación
         print("📋 REPORTE ENSEMBLE:")
         print("=" * 80)
-        report = classification_report(true_classes, predicted_classes, 
-                                     target_names=class_labels, 
+        reporte = classification_report(clases_verdaderas, clases_predichas, 
+                                     target_names=etiquetas_clases, 
                                      output_dict=True)
         
         # Mostrar por clase
-        for class_name, metrics in report.items():
-            if isinstance(metrics, dict) and class_name not in ['accuracy', 'macro avg', 'weighted avg']:
-                spanish_name = self.class_info.get(class_name, {}).get('nombre', class_name)
-                print(f"{spanish_name:30} | Precisión: {metrics['precision']:.3f} | "
-                      f"Recall: {metrics['recall']:.3f} | F1: {metrics['f1-score']:.3f}")
+        for nombre_clase, metricas in reporte.items():
+            if isinstance(metricas, dict) and nombre_clase not in ['accuracy', 'macro avg', 'weighted avg']:
+                nombre_español = self.informacion_clases.get(nombre_clase, {}).get('nombre', nombre_clase)
+                print(f"{nombre_español:30} | Precisión: {metricas['precision']:.3f} | "
+                      f"Recall: {metricas['recall']:.3f} | F1: {metricas['f1-score']:.3f}")
         
-        ensemble_accuracy = report['accuracy']
-        ensemble_f1 = report['weighted avg']['f1-score']
+        precision_ensemble = reporte['accuracy']
+        f1_ensemble = reporte['weighted avg']['f1-score']
         
         print("=" * 80)
-        print(f"🎯 ENSEMBLE ACCURACY: {ensemble_accuracy:.4f}")
-        print(f"📊 ENSEMBLE F1-SCORE: {ensemble_f1:.4f}")
+        print(f"🎯 ENSEMBLE ACCURACY: {precision_ensemble:.4f}")
+        print(f"📊 ENSEMBLE F1-SCORE: {f1_ensemble:.4f}")
         
-        return ensemble_accuracy, ensemble_f1, report
+        return precision_ensemble, f1_ensemble, reporte
     
-    def train_ensemble(self, dataset_path, epochs=25):
+    def entrenar_ensemble(self, ruta_dataset, epocas=25):
         """Entrena ensemble completo"""
         print("🚀 ENTRENAMIENTO ENSEMBLE MÉDICO INICIADO")
         print("=" * 60)
         
         # Preparar datos
-        train_gen, val_gen = self.prepare_data(dataset_path)
-        num_classes = len(train_gen.class_indices)
+        gen_entrenamiento, gen_validacion = self.preparar_datos(ruta_dataset)
+        num_clases = len(gen_entrenamiento.class_indices)
         
         # Crear modelos individuales
-        architectures = ['mobilenet', 'efficientnet', 'resnet']
-        models = []
-        histories = []
-        individual_accuracies = []
+        arquitecturas = ['mobilenet', 'efficientnet', 'resnet']
+        modelos = []
+        historiales = []
+        precisiones_individuales = []
         
-        for arch in architectures:
-            print(f"\n{'='*20} {arch.upper()} {'='*20}")
+        for arq in arquitecturas:
+            print(f"\n{'='*20} {arq.upper()} {'='*20}")
             
             # Crear modelo
-            model = self.create_individual_model(arch, num_classes, f'{arch}_medical')
+            modelo = self.crear_modelo_individual(arq, num_clases, f'{arq}_medical')
             
             # Entrenar
-            trained_model, history, final_acc = self.train_individual_model(
-                model, arch, train_gen, val_gen, epochs
+            modelo_entrenado, historial, precision_final = self.entrenar_modelo_individual(
+                modelo, arq, gen_entrenamiento, gen_validacion, epocas
             )
             
-            models.append(trained_model)
-            histories.append(history)
-            individual_accuracies.append(final_acc)
+            modelos.append(modelo_entrenado)
+            historiales.append(historial)
+            precisiones_individuales.append(precision_final)
         
         # Evaluar ensemble
         print(f"\n{'='*60}")
@@ -350,45 +350,45 @@ class MedicalEnsemble:
         
         # Mostrar accuracies individuales
         print("\n📊 ACCURACIES INDIVIDUALES:")
-        for i, arch in enumerate(architectures):
-            print(f"   {arch:12}: {individual_accuracies[i]:.4f}")
+        for i, arq in enumerate(arquitecturas):
+            print(f"   {arq:12}: {precisiones_individuales[i]:.4f}")
         
         # Evaluar ensemble con pesos optimizados
-        ensemble_acc, ensemble_f1, ensemble_report = self.evaluate_ensemble(models, val_gen)
+        precision_ensemble, f1_ensemble, reporte_ensemble = self.evaluar_ensemble(modelos, gen_validacion)
         
         # Guardar modelos
-        for i, arch in enumerate(architectures):
-            models[i].save(f'ensemble_{arch}_model.h5')
+        for i, arq in enumerate(arquitecturas):
+            modelos[i].save(f'ensemble_{arq}_model.h5')
         
         # Guardar información del ensemble
-        np.save('ensemble_class_indices.npy', train_gen.class_indices)
+        np.save('ensemble_class_indices.npy', gen_entrenamiento.class_indices)
         
         # Crear gráfico comparativo
-        self.plot_ensemble_results(architectures, histories, individual_accuracies, ensemble_acc)
+        self.graficar_resultados_ensemble(arquitecturas, historiales, precisiones_individuales, precision_ensemble)
         
         print(f"\n🎉 ENSEMBLE COMPLETADO")
         print("=" * 50)
         print("📈 COMPARACIÓN DE PARADIGMAS:")
         print(f"   CNN Individual (tu anterior): 70.44%")
-        print(f"   Ensemble de CNNs:             {ensemble_acc:.2%}")
-        print(f"   Mejora: {((ensemble_acc/0.7044)-1)*100:+.1f}%")
+        print(f"   Ensemble de CNNs:             {precision_ensemble:.2%}")
+        print(f"   Mejora: {((precision_ensemble/0.7044)-1)*100:+.1f}%")
         
-        return models, histories, ensemble_acc
+        return modelos, historiales, precision_ensemble
     
-    def plot_ensemble_results(self, architectures, histories, individual_accs, ensemble_acc):
+    def graficar_resultados_ensemble(self, arquitecturas, historiales, precisiones_individuales, precision_ensemble):
         """Visualiza resultados del ensemble"""
         print("📈 Generando análisis visual del ensemble...")
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # 1. Accuracy por época - todos los modelos
-        colors = ['blue', 'red', 'green']
-        for i, (arch, history) in enumerate(zip(architectures, histories)):
-            axes[0, 0].plot(history.history['val_accuracy'], 
-                           label=f'{arch}', color=colors[i], linewidth=2)
+        colores = ['blue', 'red', 'green']
+        for i, (arq, historial) in enumerate(zip(arquitecturas, historiales)):
+            axes[0, 0].plot(historial.history['val_accuracy'], 
+                           label=f'{arq}', color=colores[i], linewidth=2)
         
-        axes[0, 0].axhline(y=ensemble_acc, color='purple', linestyle='--', 
-                          linewidth=3, label=f'Ensemble: {ensemble_acc:.3f}')
+        axes[0, 0].axhline(y=precision_ensemble, color='purple', linestyle='--', 
+                          linewidth=3, label=f'Ensemble: {precision_ensemble:.3f}')
         axes[0, 0].set_title('Evolución de Accuracy - Ensemble')
         axes[0, 0].set_xlabel('Época')
         axes[0, 0].set_ylabel('Validation Accuracy')
@@ -396,25 +396,25 @@ class MedicalEnsemble:
         axes[0, 0].grid(True, alpha=0.3)
         
         # 2. Comparación de accuracies finales
-        all_accs = individual_accs + [ensemble_acc]
-        all_names = architectures + ['Ensemble']
-        colors_bar = ['lightblue', 'lightcoral', 'lightgreen', 'purple']
+        todas_precisiones = precisiones_individuales + [precision_ensemble]
+        todos_nombres = arquitecturas + ['Ensemble']
+        colores_barras = ['lightblue', 'lightcoral', 'lightgreen', 'purple']
         
-        bars = axes[0, 1].bar(all_names, all_accs, color=colors_bar)
+        barras = axes[0, 1].bar(todos_nombres, todas_precisiones, color=colores_barras)
         axes[0, 1].set_title('Comparación Final de Accuracies')
         axes[0, 1].set_ylabel('Validation Accuracy')
-        axes[0, 1].set_ylim(0, max(all_accs) + 0.1)
+        axes[0, 1].set_ylim(0, max(todas_precisiones) + 0.1)
         
         # Agregar valores en las barras
-        for bar, acc in zip(bars, all_accs):
-            height = bar.get_height()
-            axes[0, 1].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                           f'{acc:.3f}', ha='center', va='bottom', fontweight='bold')
+        for barra, precision in zip(barras, todas_precisiones):
+            altura = barra.get_height()
+            axes[0, 1].text(barra.get_x() + barra.get_width()/2., altura + 0.01,
+                           f'{precision:.3f}', ha='center', va='bottom', fontweight='bold')
         
         # 3. Loss evolution
-        for i, (arch, history) in enumerate(zip(architectures, histories)):
-            axes[1, 0].plot(history.history['val_loss'], 
-                           label=f'{arch}', color=colors[i], linewidth=2)
+        for i, (arq, historial) in enumerate(zip(arquitecturas, historiales)):
+            axes[1, 0].plot(historial.history['val_loss'], 
+                           label=f'{arq}', color=colores[i], linewidth=2)
         
         axes[1, 0].set_title('Evolución de Loss - Ensemble')
         axes[1, 0].set_xlabel('Época')
@@ -441,34 +441,34 @@ class MedicalEnsemble:
         plt.savefig('ensemble_medical_results.png', dpi=300, bbox_inches='tight')
         plt.show()
 
-def main_ensemble():
+def principal_ensemble():
     """Función principal para ensemble"""
     print("👁️🤖 ENSEMBLE MÉDICO DE CNNs")
     print("=" * 70)
     
     # Configuración
-    DATASET_PATH = "./Dataset"
-    EPOCHS = 25  # Mismas épocas que CNN individual para comparación justa
+    RUTA_DATASET = "./Dataset"
+    EPOCAS = 25  # Mismas épocas que CNN individual para comparación justa
     
     # Verificar dataset
-    if not os.path.exists(DATASET_PATH):
-        print(f"❌ Error: No se encontró el dataset en {DATASET_PATH}")
+    if not os.path.exists(RUTA_DATASET):
+        print(f"❌ Error: No se encontró el dataset en {RUTA_DATASET}")
         return
     
     # Crear ensemble
-    ensemble = MedicalEnsemble()
+    ensemble = EnsembleMedico()
     
     try:
-        models, histories, ensemble_accuracy = ensemble.train_ensemble(
-            dataset_path=DATASET_PATH,
-            epochs=EPOCHS
+        modelos, historiales, precision_ensemble = ensemble.entrenar_ensemble(
+            ruta_dataset=RUTA_DATASET,
+            epocas=EPOCAS
         )
         
         print("\n🎉 ¡ENSEMBLE COMPLETADO EXITOSAMENTE!")
         print("=" * 60)
         print("🆚 COMPARACIÓN COMPLETA DE PARADIGMAS:")
         print("   CNN Individual:    70.44% accuracy")
-        print(f"   Ensemble de CNNs:   {ensemble_accuracy:.2%} accuracy")
+        print(f"   Ensemble de CNNs:   {precision_ensemble:.2%} accuracy")
         print("\n✅ Dos enfoques completamente diferentes probados")
         print("📁 Modelos guardados: ensemble_[arquitectura]_model.h5")
         
@@ -476,4 +476,4 @@ def main_ensemble():
         print(f"\n❌ Error durante ensemble: {str(e)}")
 
 if __name__ == "__main__":
-    main_ensemble()
+    principal_ensemble()

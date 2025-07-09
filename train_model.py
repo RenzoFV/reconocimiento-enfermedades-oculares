@@ -15,10 +15,10 @@ from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 import warnings
 warnings.filterwarnings('ignore')
 
-class EyeDiseaseTrainer:
+class EntrenadorEnfermedadesOculares:
     def __init__(self):
         # Mapeo de clases en español
-        self.class_info = {
+        self.informacion_clases = {
             'Central Serous Chorioretinopathy [Color Fundus]': {
                 'nombre': 'Corioretinopatía Serosa Central',
                 'descripcion': 'Acumulación de líquido bajo la retina que causa visión borrosa'
@@ -62,54 +62,54 @@ class EyeDiseaseTrainer:
         }
         
         # Configuración del modelo
-        self.img_height = 224
-        self.img_width = 224
-        self.batch_size = 64
-        self.validation_split = 0.15
+        self.alto_img = 224
+        self.ancho_img = 224
+        self.tamaño_lote = 64
+        self.division_validacion = 0.15
         
-    def analyze_dataset(self, dataset_path):
+    def analizar_dataset(self, ruta_dataset):
         """Analiza el dataset antes del entrenamiento"""
         print("📊 Analizando dataset...")
         print("=" * 50)
         
-        class_counts = {}
-        total_images = 0
+        conteos_clases = {}
+        total_imagenes = 0
         
-        for class_name in os.listdir(dataset_path):
-            class_path = os.path.join(dataset_path, class_name)
-            if os.path.isdir(class_path):
-                image_files = [f for f in os.listdir(class_path) 
+        for nombre_clase in os.listdir(ruta_dataset):
+            ruta_clase = os.path.join(ruta_dataset, nombre_clase)
+            if os.path.isdir(ruta_clase):
+                archivos_imagen = [f for f in os.listdir(ruta_clase) 
                              if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
-                count = len(image_files)
-                spanish_name = self.class_info.get(class_name, {}).get('nombre', class_name)
-                class_counts[spanish_name] = count
-                total_images += count
-                print(f"✅ {spanish_name}: {count} imágenes")
+                conteo = len(archivos_imagen)
+                nombre_español = self.informacion_clases.get(nombre_clase, {}).get('nombre', nombre_clase)
+                conteos_clases[nombre_español] = conteo
+                total_imagenes += conteo
+                print(f"✅ {nombre_español}: {conteo} imágenes")
         
         print("=" * 50)
-        print(f"📈 Total de imágenes: {total_images}")
-        print(f"📁 Número de clases: {len(class_counts)}")
-        print(f"📊 Promedio por clase: {total_images/len(class_counts):.0f}")
+        print(f"📈 Total de imágenes: {total_imagenes}")
+        print(f"📁 Número de clases: {len(conteos_clases)}")
+        print(f"📊 Promedio por clase: {total_imagenes/len(conteos_clases):.0f}")
         
         # Verificar balance
-        counts = list(class_counts.values())
-        min_count, max_count = min(counts), max(counts)
-        balance_ratio = min_count / max_count
+        conteos = list(conteos_clases.values())
+        conteo_minimo, conteo_maximo = min(conteos), max(conteos)
+        ratio_balance = conteo_minimo / conteo_maximo
         
-        if balance_ratio < 0.5:
+        if ratio_balance < 0.5:
             print("⚠️  Dataset desbalanceado - considera técnicas de balanceo")
         else:
             print("✅ Dataset relativamente balanceado")
         
         print("=" * 50)
-        return class_counts, total_images
+        return conteos_clases, total_imagenes
     
-    def prepare_data(self, dataset_path):
+    def preparar_datos(self, ruta_dataset):
         """Prepara los generadores de datos"""
         print("🔄 Preparando generadores de datos...")
         
         # Data augmentation para entrenamiento
-        train_datagen = ImageDataGenerator(
+        generador_datos_entrenamiento = ImageDataGenerator(
             rescale=1./255,
             rotation_range=25,
             width_shift_range=0.15,
@@ -119,59 +119,59 @@ class EyeDiseaseTrainer:
             horizontal_flip=True,
             brightness_range=[0.8, 1.2],
             fill_mode='nearest',
-            validation_split=self.validation_split
+            validation_split=self.division_validacion
         )
         
         # Solo rescaling para validación
-        val_datagen = ImageDataGenerator(
+        generador_datos_validacion = ImageDataGenerator(
             rescale=1./255,
-            validation_split=self.validation_split
+            validation_split=self.division_validacion
         )
         
         # Generador de entrenamiento
-        train_generator = train_datagen.flow_from_directory(
-            dataset_path,
-            target_size=(self.img_height, self.img_width),
-            batch_size=self.batch_size,
+        generador_entrenamiento = generador_datos_entrenamiento.flow_from_directory(
+            ruta_dataset,
+            target_size=(self.alto_img, self.ancho_img),
+            batch_size=self.tamaño_lote,
             class_mode='categorical',
             subset='training',
             shuffle=True
         )
         
         # Generador de validación
-        validation_generator = val_datagen.flow_from_directory(
-            dataset_path,
-            target_size=(self.img_height, self.img_width),
-            batch_size=self.batch_size,
+        generador_validacion = generador_datos_validacion.flow_from_directory(
+            ruta_dataset,
+            target_size=(self.alto_img, self.ancho_img),
+            batch_size=self.tamaño_lote,
             class_mode='categorical',
             subset='validation',
             shuffle=False
         )
         
-        print(f"✅ Datos de entrenamiento: {train_generator.samples} imágenes")
-        print(f"✅ Datos de validación: {validation_generator.samples} imágenes")
+        print(f"✅ Datos de entrenamiento: {generador_entrenamiento.samples} imágenes")
+        print(f"✅ Datos de validación: {generador_validacion.samples} imágenes")
         
-        return train_generator, validation_generator
+        return generador_entrenamiento, generador_validacion
     
-    def create_model(self, num_classes):
+    def crear_modelo(self, num_clases):
         """Crea el modelo con transfer learning"""
         print("🧠 Creando modelo con transfer learning...")
         
         # Modelo base preentrenado
-        base_model = MobileNetV2(
+        modelo_base = MobileNetV2(
             weights='imagenet',
             include_top=False,
-            input_shape=(self.img_height, self.img_width, 3)
+            input_shape=(self.alto_img, self.ancho_img, 3)
         )
         
         # Fine-tuning: descongelar las últimas capas
-        base_model.trainable = True
-        for layer in base_model.layers[:-20]:
-            layer.trainable = False
+        modelo_base.trainable = True
+        for capa in modelo_base.layers[:-20]:
+            capa.trainable = False
         
         # Construir modelo completo
-        model = tf.keras.Sequential([
-            base_model,
+        modelo = tf.keras.Sequential([
+            modelo_base,
             layers.GlobalAveragePooling2D(),
             layers.Dropout(0.4),
             layers.Dense(256, activation='relu'),
@@ -180,11 +180,11 @@ class EyeDiseaseTrainer:
             layers.Dense(128, activation='relu'),
             layers.BatchNormalization(),
             layers.Dropout(0.2),
-            layers.Dense(num_classes, activation='softmax')
+            layers.Dense(num_clases, activation='softmax')
         ])
         
         # Compilar modelo
-        model.compile(
+        modelo.compile(
             optimizer=Adam(learning_rate=0.0001),
             loss='categorical_crossentropy',
             metrics=['accuracy', 'top_k_categorical_accuracy']
@@ -192,24 +192,24 @@ class EyeDiseaseTrainer:
         
         # Mostrar resumen
         print("📋 Resumen del modelo:")
-        model.summary()
+        modelo.summary()
         
-        return model
+        return modelo
     
-    def train_model(self, dataset_path, epochs=20, save_path='eye_disease_model.h5'):
+    def entrenar_modelo(self, ruta_dataset, epocas=20, ruta_guardado='eye_disease_model.h5'):
         """Entrena el modelo completo"""
         print("🚀 Iniciando entrenamiento...")
         print("=" * 50)
         
         # Analizar dataset
-        self.analyze_dataset(dataset_path)
+        self.analizar_dataset(ruta_dataset)
         
         # Preparar datos
-        train_gen, val_gen = self.prepare_data(dataset_path)
-        num_classes = len(train_gen.class_indices)
+        gen_entrenamiento, gen_validacion = self.preparar_datos(ruta_dataset)
+        num_clases = len(gen_entrenamiento.class_indices)
         
         # Crear modelo
-        model = self.create_model(num_classes)
+        modelo = self.crear_modelo(num_clases)
         
         # Callbacks
         callbacks = [
@@ -227,7 +227,7 @@ class EyeDiseaseTrainer:
                 verbose=1
             ),
             ModelCheckpoint(
-                save_path,
+                ruta_guardado,
                 monitor='val_accuracy',
                 save_best_only=True,
                 verbose=1
@@ -235,38 +235,38 @@ class EyeDiseaseTrainer:
         ]
         
         # Entrenar
-        print(f"🎯 Entrenando por {epochs} épocas...")
-        history = model.fit(
-            train_gen,
-            epochs=epochs,
-            validation_data=val_gen,
+        print(f"🎯 Entrenando por {epocas} épocas...")
+        historial = modelo.fit(
+            gen_entrenamiento,
+            epochs=epocas,
+            validation_data=gen_validacion,
             callbacks=callbacks,
             verbose=1
         )
         
         # Guardar clases para la aplicación principal
-        class_indices = train_gen.class_indices
-        np.save('class_indices.npy', class_indices)
+        indices_clases = gen_entrenamiento.class_indices
+        np.save('class_indices.npy', indices_clases)
         
         print("=" * 50)
-        print(f"✅ Modelo guardado como: {save_path}")
+        print(f"✅ Modelo guardado como: {ruta_guardado}")
         print(f"✅ Índices de clases guardados como: class_indices.npy")
         
         # Mostrar métricas finales
-        self.plot_training_results(history)
-        self.evaluate_model(model, val_gen)
+        self.graficar_resultados_entrenamiento(historial)
+        self.evaluar_modelo(modelo, gen_validacion)
         
-        return model, history
+        return modelo, historial
     
-    def plot_training_results(self, history):
+    def graficar_resultados_entrenamiento(self, historial):
         """Visualiza los resultados del entrenamiento"""
         print("📈 Generando gráficos de entrenamiento...")
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # Accuracy
-        axes[0, 0].plot(history.history['accuracy'], label='Entrenamiento', color='blue')
-        axes[0, 0].plot(history.history['val_accuracy'], label='Validación', color='red')
+        axes[0, 0].plot(historial.history['accuracy'], label='Entrenamiento', color='blue')
+        axes[0, 0].plot(historial.history['val_accuracy'], label='Validación', color='red')
         axes[0, 0].set_title('Precisión del Modelo')
         axes[0, 0].set_xlabel('Época')
         axes[0, 0].set_ylabel('Precisión')
@@ -274,8 +274,8 @@ class EyeDiseaseTrainer:
         axes[0, 0].grid(True)
         
         # Loss
-        axes[0, 1].plot(history.history['loss'], label='Entrenamiento', color='blue')
-        axes[0, 1].plot(history.history['val_loss'], label='Validación', color='red')
+        axes[0, 1].plot(historial.history['loss'], label='Entrenamiento', color='blue')
+        axes[0, 1].plot(historial.history['val_loss'], label='Validación', color='red')
         axes[0, 1].set_title('Pérdida del Modelo')
         axes[0, 1].set_xlabel('Época')
         axes[0, 1].set_ylabel('Pérdida')
@@ -283,8 +283,8 @@ class EyeDiseaseTrainer:
         axes[0, 1].grid(True)
         
         # Top-k accuracy
-        axes[1, 0].plot(history.history['top_k_categorical_accuracy'], label='Top-K Entrenamiento', color='green')
-        axes[1, 0].plot(history.history['val_top_k_categorical_accuracy'], label='Top-K Validación', color='orange')
+        axes[1, 0].plot(historial.history['top_k_categorical_accuracy'], label='Top-K Entrenamiento', color='green')
+        axes[1, 0].plot(historial.history['val_top_k_categorical_accuracy'], label='Top-K Validación', color='orange')
         axes[1, 0].set_title('Top-K Categorical Accuracy')
         axes[1, 0].set_xlabel('Época')
         axes[1, 0].set_ylabel('Top-K Accuracy')
@@ -292,8 +292,8 @@ class EyeDiseaseTrainer:
         axes[1, 0].grid(True)
         
         # Learning rate (si está disponible)
-        if 'lr' in history.history:
-            axes[1, 1].plot(history.history['lr'], color='purple')
+        if 'lr' in historial.history:
+            axes[1, 1].plot(historial.history['lr'], color='purple')
             axes[1, 1].set_title('Learning Rate')
             axes[1, 1].set_xlabel('Época')
             axes[1, 1].set_ylabel('Learning Rate')
@@ -308,74 +308,74 @@ class EyeDiseaseTrainer:
         plt.show()
         
         # Mostrar métricas finales
-        final_acc = history.history['val_accuracy'][-1]
-        final_loss = history.history['val_loss'][-1]
-        print(f"📊 Precisión final en validación: {final_acc:.4f}")
-        print(f"📊 Pérdida final en validación: {final_loss:.4f}")
+        precision_final = historial.history['val_accuracy'][-1]
+        perdida_final = historial.history['val_loss'][-1]
+        print(f"📊 Precisión final en validación: {precision_final:.4f}")
+        print(f"📊 Pérdida final en validación: {perdida_final:.4f}")
     
-    def evaluate_model(self, model, val_gen):
+    def evaluar_modelo(self, modelo, gen_validacion):
         """Evalúa el modelo en el conjunto de validación"""
         print("🔬 Evaluando modelo en conjunto de validación...")
         
         # Resetear generador
-        val_gen.reset()
+        gen_validacion.reset()
         
         # Predicciones
-        predictions = model.predict(val_gen, verbose=1)
-        predicted_classes = np.argmax(predictions, axis=1)
+        predicciones = modelo.predict(gen_validacion, verbose=1)
+        clases_predichas = np.argmax(predicciones, axis=1)
         
         # Etiquetas verdaderas
-        true_classes = val_gen.classes
-        class_labels = list(val_gen.class_indices.keys())
+        clases_verdaderas = gen_validacion.classes
+        etiquetas_clases = list(gen_validacion.class_indices.keys())
         
         # Reporte de clasificación
         print("\n📋 Reporte de Clasificación:")
         print("=" * 80)
-        report = classification_report(true_classes, predicted_classes, 
-                                     target_names=class_labels, 
+        reporte = classification_report(clases_verdaderas, clases_predichas, 
+                                     target_names=etiquetas_clases, 
                                      output_dict=True)
         
         # Mostrar métricas por clase
-        for class_name, metrics in report.items():
-            if isinstance(metrics, dict) and class_name not in ['accuracy', 'macro avg', 'weighted avg']:
-                spanish_name = self.class_info.get(class_name, {}).get('nombre', class_name)
-                print(f"{spanish_name:30} | Precisión: {metrics['precision']:.3f} | "
-                      f"Recall: {metrics['recall']:.3f} | F1: {metrics['f1-score']:.3f}")
+        for nombre_clase, metricas in reporte.items():
+            if isinstance(metricas, dict) and nombre_clase not in ['accuracy', 'macro avg', 'weighted avg']:
+                nombre_español = self.informacion_clases.get(nombre_clase, {}).get('nombre', nombre_clase)
+                print(f"{nombre_español:30} | Precisión: {metricas['precision']:.3f} | "
+                      f"Recall: {metricas['recall']:.3f} | F1: {metricas['f1-score']:.3f}")
         
         print("=" * 80)
-        print(f"Precisión general: {report['accuracy']:.4f}")
-        print(f"F1-score promedio: {report['weighted avg']['f1-score']:.4f}")
+        print(f"Precisión general: {reporte['accuracy']:.4f}")
+        print(f"F1-score promedio: {reporte['weighted avg']['f1-score']:.4f}")
 
-def main():
+def principal():
     """Función principal para entrenar el modelo"""
     print("👁️ ENTRENADOR DE CLASIFICADOR DE ENFERMEDADES OCULARES")
     print("=" * 60)
     
     # Configuración
-    DATASET_PATH = "./Dataset"  # Cambia esta ruta si es necesario
-    EPOCHS = 25
-    MODEL_NAME = "eye_disease_model.h5"
+    RUTA_DATASET = "./Dataset"  # Cambia esta ruta si es necesario
+    EPOCAS = 25
+    NOMBRE_MODELO = "eye_disease_model.h5"
     
     # Verificar que existe el dataset
-    if not os.path.exists(DATASET_PATH):
-        print(f"❌ Error: No se encontró el dataset en {DATASET_PATH}")
+    if not os.path.exists(RUTA_DATASET):
+        print(f"❌ Error: No se encontró el dataset en {RUTA_DATASET}")
         print("📁 Asegúrate de que la carpeta Dataset esté en el directorio actual")
         return
     
     # Crear entrenador
-    trainer = EyeDiseaseTrainer()
+    entrenador = EntrenadorEnfermedadesOculares()
     
     # Entrenar modelo
     try:
-        model, history = trainer.train_model(
-            dataset_path=DATASET_PATH,
-            epochs=EPOCHS,
-            save_path=MODEL_NAME
+        modelo, historial = entrenador.entrenar_modelo(
+            ruta_dataset=RUTA_DATASET,
+            epocas=EPOCAS,
+            ruta_guardado=NOMBRE_MODELO
         )
         
         print("\n🎉 ¡ENTRENAMIENTO COMPLETADO EXITOSAMENTE!")
         print("=" * 60)
-        print(f"✅ Modelo guardado: {MODEL_NAME}")
+        print(f"✅ Modelo guardado: {NOMBRE_MODELO}")
         print(f"✅ Índices de clases: class_indices.npy")
         print(f"✅ Gráficos: training_results.png")
         print("\n🚀 Ahora puedes ejecutar 'streamlit run app.py' para usar la aplicación")
@@ -385,4 +385,4 @@ def main():
         print("🔧 Verifica que todas las dependencias están instaladas correctamente")
 
 if __name__ == "__main__":
-    main()
+    principal()
