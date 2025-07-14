@@ -23,8 +23,10 @@ from scipy import stats
 import itertools
 from pathlib import Path
 from translations import get_text, get_available_languages
+import download_models
 
 warnings.filterwarnings('ignore')
+download_models.descargar_modelos()
 
 # Configuración de página
 def configurar_pagina(lang='es'):
