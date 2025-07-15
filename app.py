@@ -17,7 +17,8 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 import seaborn as sns
 from fpdf import FPDF
-from sklearn.metrics import matthews_corrcoef, confusion_matrix, classification_report
+from sklearn.metrics import matthews_corrcoef, confusion_matrix, classification_report, roc_curve, auc, roc_auc_score
+from sklearn.preprocessing import label_binarize
 from scipy.stats import chi2
 from scipy import stats
 import itertools
@@ -26,7 +27,7 @@ from translations import get_text, get_available_languages
 import download_models
 
 warnings.filterwarnings('ignore')
-download_models.descargar_modelos()
+#download_models.descargar_modelos()
 
 # Configuración de página
 def configurar_pagina(lang='es'):
@@ -37,19 +38,21 @@ def configurar_pagina(lang='es'):
         initial_sidebar_state="expanded"
     )
 
-
-# Agregar selector de idioma en el sidebar
+# Agregar selector de idioma en el sidebar - ACTUALIZADO PARA 3 IDIOMAS
 def mostrar_selector_idioma():
     if 'language' not in st.session_state:
         st.session_state.language = 'es'
     
     languages = get_available_languages()
     
+    # Encontrar el índice actual
+    current_index = list(languages.keys()).index(st.session_state.language) if st.session_state.language in languages else 0
+    
     selected_lang = st.sidebar.selectbox(
         get_text('select_language', st.session_state.language),
         options=list(languages.keys()),
         format_func=lambda x: languages[x],
-        index=0 if st.session_state.language == 'es' else 1,
+        index=current_index,
         key="language_selector"
     )
     
@@ -209,6 +212,69 @@ class AplicacionTresArquitecturas:
         self.analisis_actual = None
         self.resultados_estadisticos = None  # Para almacenar resultados estadísticos
     
+    
+    def limpiar_texto_pdf(self, texto):
+        """Limpia texto para compatibilidad con FPDF"""
+        if not isinstance(texto, str):
+            texto = str(texto)
+        
+        # Reemplazos de caracteres especiales
+        reemplazos = {
+            '\u2022': '- ',     # Viñeta
+            '•': '- ',          # Viñeta
+            '✅': '[OK] ',
+            '❌': '[X] ',
+            '⚠️': '[!] ',
+            '🔬': '[TEST] ',
+            '📊': '[CHART] ',
+            '🎯': '[TARGET] ',
+            '🟢': '[EXCELENTE] ',
+            '🔵': '[BUENO] ',
+            '🟡': '[REGULAR] ',
+            '🟠': '[BAJO] ',
+            '🔴': '[MUY BAJO] ',
+            '→': '-> ',
+            '←': '<- ',
+            '↑': '^',
+            '↓': 'v',
+            '"': '"',
+            '"': '"',
+            ''': "'",
+            ''': "'",
+            '–': '-',
+            '—': '-',
+            '…': '...',
+            'α': 'alpha',
+            'β': 'beta',
+            'γ': 'gamma',
+            'δ': 'delta',
+            'ε': 'epsilon',
+            'θ': 'theta',
+            'μ': 'mu',
+            'σ': 'sigma',
+            'π': 'pi',
+            '₀': '0',
+            '₁': '1',
+            '₂': '2',
+            '°': ' grados',
+            '±': '+/-',
+            '≤': '<=',
+            '≥': '>=',
+            '≠': '!=',
+            '≈': '~=',
+            '∞': 'infinito'
+        }
+        
+        # Aplicar reemplazos
+        for unicode_char, ascii_char in reemplazos.items():
+            texto = texto.replace(unicode_char, ascii_char)
+        
+        # Remover cualquier carácter que no sea ASCII
+        texto = texto.encode('ascii', errors='ignore').decode('ascii')
+        
+        return texto
+    
+    
     @st.cache_resource
     def cargar_modelos(_self):
         """Carga las 3 arquitecturas para comparar"""
@@ -225,9 +291,9 @@ class AplicacionTresArquitecturas:
             for nombre_arq, nombre_archivo in archivos_modelos.items():
                 if os.path.exists(nombre_archivo):
                     modelos[nombre_arq] = tf.keras.models.load_model(nombre_archivo)
-                    st.success(f"✅ {nombre_arq} cargado correctamente")
+                    st.success(get_text('model_loaded', _self.lang, name=nombre_arq))
                 else:
-                    st.warning(f"⚠️ No se encontró {nombre_archivo}")
+                    st.warning(get_text('model_not_found', _self.lang, filename=nombre_archivo))
             
             # Cargar nombres de clases
             nombres_clases_conjunto = {}
@@ -249,7 +315,7 @@ class AplicacionTresArquitecturas:
             return modelos, nombres_clases_conjunto, nombres_clases_individuales
             
         except Exception as e:
-            st.error(f"Error cargando modelos: {str(e)}")
+            st.error(get_text('loading_error', _self.lang, error=str(e)))
             return {}, {}, {}
     
     def preprocesar_imagen(self, imagen):
@@ -605,28 +671,23 @@ class AplicacionTresArquitecturas:
             return None
     
     def mostrar_seccion_analisis_estadistico(self):
-        """Sección completa de análisis estadístico"""
+        """Sección completa de análisis estadístico - TRADUCIDA"""
         st.markdown("---")
-        st.header("📊 ANÁLISIS ESTADÍSTICO INFERENCIAL")
-        st.markdown("""
-        **Evaluación rigurosa con pruebas estadísticas:**
-        - 🎯 **Coeficiente de Matthews (MCC)**: Métrica balanceada que considera todos los casos de la matriz de confusión
-        - 🔬 **Prueba de McNemar**: Comparación estadística entre pares de modelos
-        - 📈 **Intervalos de Confianza**: Bootstrap CI para robustez estadística
-        """)
+        st.header(get_text('statistical_analysis_title', self.lang))
+        st.markdown(get_text('statistical_description', self.lang))
         
         # Dataset de evaluación
-        st.subheader("📂 Dataset de Evaluación")
+        st.subheader(get_text('dataset_evaluation', self.lang))
         
         # Input de ruta de carpeta
         carpeta_dataset = st.text_input(
-            "🗂️ Ruta de la carpeta de pruebas:",
+            get_text('dataset_path', self.lang),
             value="Pruebas",  # Valor por defecto
-            help="Ejemplo: Pruebas, ./Pruebas, /path/to/Pruebas"
+            help=get_text('dataset_path_help', self.lang)
         )
         
         # Mostrar estructura esperada
-        with st.expander("📋 Estructura de carpetas esperada"):
+        with st.expander(get_text('expected_structure', self.lang)):
             st.code("""
     📂 Pruebas/
     ├── 📁 Central_Serous_Chorioretinopathy/
@@ -653,10 +714,10 @@ class AplicacionTresArquitecturas:
         if carpeta_dataset:
             ruta_dataset = Path(carpeta_dataset)
             if ruta_dataset.exists() and ruta_dataset.is_dir():
-                st.success(f"✅ Carpeta encontrada: {ruta_dataset.absolute()}")
+                st.success(get_text('folder_found', self.lang, path=str(ruta_dataset.absolute())))
                 
                 # Vista previa del dataset
-                if st.button("👀 Vista Previa del Dataset", key="vista_previa_dataset"):
+                if st.button(get_text('dataset_preview', self.lang), key="vista_previa_dataset"):
                     with st.spinner("🔍 Escaneando dataset..."):
                         datos_vista_previa, mapeo_clases = self.escanear_carpeta_dataset(ruta_dataset)
                         
@@ -690,7 +751,7 @@ class AplicacionTresArquitecturas:
                             st.dataframe(df_vista_previa.head(10), use_container_width=True)
                 
                 # Botón de evaluación
-                if st.button("🚀 INICIAR EVALUACIÓN ESTADÍSTICA", type="primary", use_container_width=True, key="eval_carpeta"):
+                if st.button(get_text('start_evaluation', self.lang), type="primary", use_container_width=True, key="eval_carpeta"):
                     st.info("🔄 Evaluando modelos en dataset completo... Esto puede tomar varios minutos.")
                     
                     # Evaluar modelos
@@ -708,10 +769,10 @@ class AplicacionTresArquitecturas:
                             st.session_state.resultados_evaluacion = resultados_evaluacion
                             
                             # Mostrar resultados
-                            self.mostrar_resultados_estadisticos(resultados_estadisticos, resultados_evaluacion)
+                            self.mostrar_resultados_estadisticos(resultados_estadisticos, resultados_evaluacion, key_suffix="_actual")
             
             else:
-                st.error(f"❌ No se encontró la carpeta: {carpeta_dataset}")
+                st.error(get_text('folder_not_found', self.lang, path=carpeta_dataset))
                 st.markdown("**💡 Sugerencias:**")
                 st.markdown("• Verifica que la ruta sea correcta")
                 st.markdown("• Usa rutas relativas como `Pruebas` o `./Pruebas`")
@@ -723,10 +784,11 @@ class AplicacionTresArquitecturas:
             st.info("📊 Mostrando resultados de análisis estadístico previo")
             self.mostrar_resultados_estadisticos(
                 st.session_state.resultados_estadisticos, 
-                st.session_state.resultados_evaluacion
+                st.session_state.resultados_evaluacion,
+                key_suffix="_previo"
             )
     
-    def mostrar_resultados_estadisticos(self, resultados_estadisticos, resultados_evaluacion):
+    def mostrar_resultados_estadisticos(self, resultados_estadisticos, resultados_evaluacion,key_suffix=""):
         """Muestra resultados del análisis estadístico"""
         
         # Crear timestamp único para evitar keys duplicados
@@ -751,7 +813,7 @@ class AplicacionTresArquitecturas:
             accuracy = resultados_estadisticos['puntuaciones_accuracy'][arq]
             
             datos_mcc.append({
-                'Arquitectura': arq.replace('_', ' '),
+                get_text('architecture', self.lang): arq.replace('_', ' '),
                 'MCC': f"{puntuacion_mcc:.4f}",
                 'IC 95% Inferior': f"{ci_inferior:.4f}" if ci_inferior else "N/A",
                 'IC 95% Superior': f"{ci_superior:.4f}" if ci_superior else "N/A",
@@ -888,12 +950,85 @@ class AplicacionTresArquitecturas:
             for comp in comparaciones_significativas:
                 resultado = resultados_estadisticos['resultados_mcnemar'][comp]
                 st.markdown(f"• **{comp.replace('_', ' ')}**: {resultado['interpretacion']}")
+                
+        st.subheader("📈 Curvas ROC - Análisis de Rendimiento")
+        
+        with st.spinner("🔄 Calculando curvas ROC..."):
+            curvas_roc = self.calcular_curvas_roc(resultados_evaluacion)
+            
+            if curvas_roc:
+                st.markdown("""
+                **Curvas ROC (Receiver Operating Characteristic)**:
+                - **AUC > 0.9**: Excelente capacidad discriminatoria
+                - **AUC 0.8-0.9**: Buena capacidad discriminatoria  
+                - **AUC 0.7-0.8**: Capacidad discriminatoria aceptable
+                - **AUC = 0.5**: Sin capacidad discriminatoria (aleatorio)
+                """)
+                
+                self.graficar_curvas_roc(curvas_roc, timestamp)
+                
+                # Tabla de AUC scores
+                st.markdown("#### 📊 Puntuaciones AUC por Arquitectura")
+                datos_auc = []
+                for arq, datos_roc in curvas_roc.items():
+                    if datos_roc['n_clases'] == 2:
+                        auc_score = datos_roc['roc_auc'][1]
+                    else:
+                        auc_score = datos_roc['roc_auc']['micro']
+                    
+                    datos_auc.append({
+                        get_text('architecture', self.lang): arq.replace('_', ' '),
+                        'AUC Score': f"{auc_score:.4f}",
+                        'Interpretación': self.interpretar_auc(auc_score)
+                    })
+                
+                df_auc = pd.DataFrame(datos_auc)
+                st.dataframe(df_auc, use_container_width=True)
+            else:
+                st.warning("⚠️ No se pudieron calcular las curvas ROC")
         
         # === SECCIÓN 5: EXPORTAR RESULTADOS ESTADÍSTICOS ===
         st.subheader("📤 Exportar Resultados Estadísticos")
-        
-        if st.button("📊 Generar Reporte Estadístico Completo", use_container_width=True, key=f"btn_generar_reporte_estadistico_{timestamp}"):
-            self.generar_reporte_estadistico(resultados_estadisticos, resultados_evaluacion)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📊 Generar Reporte Estadístico TXT", use_container_width=True, key=f"btn_reporte_txt_{timestamp}"):
+                self.generar_reporte_estadistico(resultados_estadisticos, resultados_evaluacion)
+
+        with col2:
+            if st.button("📄 Generar Reporte PDF Estadístico", type="primary", use_container_width=True, key=f"btn_reporte_pdf_estadistico{key_suffix}"):
+                try:
+                    estado_pdf = st.empty()
+                    estado_pdf.info("🔄 Generando reporte PDF estadístico profesional...")
+                    archivo_pdf = self.generar_reporte_pdf_estadistico(resultados_estadisticos, resultados_evaluacion)
+                    
+                    if archivo_pdf and os.path.exists(archivo_pdf):
+                        estado_pdf.success("✅ PDF estadístico generado exitosamente!")
+                        
+                        with open(archivo_pdf, "rb") as f:
+                            bytes_pdf = f.read()
+                        
+                        st.download_button(
+                            label="⬇️ DESCARGAR REPORTE PDF ESTADÍSTICO",
+                            data=bytes_pdf,
+                            file_name=f"reporte_estadistico_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key=f"descargar_pdf_estadistico{key_suffix}"
+                        )
+                        
+                        st.balloons()
+                        
+                        try:
+                            os.remove(archivo_pdf)
+                        except:
+                            pass
+                    else:
+                        st.error("❌ Error generando el reporte PDF estadístico")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
     
     def interpretar_mcc(self, puntuacion_mcc):
         """Interpreta el score MCC"""
@@ -909,6 +1044,21 @@ class AplicacionTresArquitecturas:
             return "🔴 Bajo"
         else:
             return "🔴 Muy bajo"
+    
+    
+    def interpretar_auc(self, auc_score):
+        """Interpreta el score AUC"""
+        if auc_score >= 0.9:
+            return "🟢 Excelente"
+        elif auc_score >= 0.8:
+            return "🔵 Bueno"
+        elif auc_score >= 0.7:
+            return "🟡 Aceptable"
+        elif auc_score >= 0.6:
+            return "🟠 Bajo"
+        else:
+            return "🔴 Muy bajo"
+    
     
     def graficar_mapa_calor_mcnemar(self, resultados_mcnemar, timestamp=None):
         """Crea heatmap de p-valores de McNemar"""
@@ -1068,25 +1218,234 @@ class AplicacionTresArquitecturas:
                 
         except Exception as e:
             st.error(f"Error generando reporte estadístico: {str(e)}")
+            
+    def generar_reporte_pdf_estadistico(self, resultados_estadisticos, resultados_evaluacion):
+        """Genera reporte PDF específico para análisis estadístico"""
+        try:
+            # Crear PDF
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # --- PORTADA ---
+            pdf.set_font('Arial', 'B', 24)
+            pdf.cell(0, 20, self.limpiar_texto_pdf('REPORTE ESTADÍSTICO INFERENCIAL'), 0, 1, 'C')
+            pdf.ln(5)
+            
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('Análisis Comparativo de Arquitecturas CNN'), 0, 1, 'C')
+            pdf.ln(5)
+
+            pdf.set_font('Arial', '', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Fecha: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'), 0, 1, 'C')
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Dataset de prueba: {len(resultados_evaluacion["etiquetas_verdaderas"])} imágenes'), 0, 1, 'C')
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Arquitecturas evaluadas: {len(self.modelos)}'), 0, 1, 'C')
+            pdf.ln(10)
+
+            # --- RESUMEN EJECUTIVO ESTADÍSTICO ---
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('RESUMEN EJECUTIVO ESTADÍSTICO'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+
+            # Mejor modelo por MCC
+            mejor_mcc_arq = max(resultados_estadisticos['puntuaciones_mcc'], 
+                            key=resultados_estadisticos['puntuaciones_mcc'].get)
+            mejor_mcc = resultados_estadisticos['puntuaciones_mcc'][mejor_mcc_arq]
+
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('MODELO CON MEJOR RENDIMIENTO ESTADÍSTICO:'), 0, 1)
+            pdf.set_font('Arial', '', 12)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'• Arquitectura: {self.informacion_arquitecturas[mejor_mcc_arq]["nombre_completo"]}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'• MCC Score: {mejor_mcc:.6f}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'• Interpretación: {self.interpretar_mcc(mejor_mcc)}'), 0, 1)
+
+            # Significancia estadística
+            comparaciones_sig = [comp for comp, res in resultados_estadisticos['resultados_mcnemar'].items() 
+                                if res and res['significativo']]
+
+            pdf.ln(5)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'DIFERENCIAS ESTADÍSTICAMENTE SIGNIFICATIVAS: {len(comparaciones_sig)}'), 0, 1)
+            pdf.ln(5)
+
+            # --- TABLA DE RESULTADOS MCC ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('COEFICIENTE DE CORRELACIÓN DE MATTHEWS'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+
+            pdf.set_font('Arial', '', 10)
+            pdf.multi_cell(0, 5, self.limpiar_texto_pdf('El MCC es una métrica balanceada que considera todos los elementos de la matriz de confusión. '
+                                        'Rango: -1 (predicción completamente incorrecta) a +1 (predicción perfecta). '
+                                        'Un valor de 0 indica rendimiento aleatorio.'))
+            pdf.ln(5)
+
+            # Tabla MCC
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(60, 8, self.limpiar_texto_pdf('Arquitectura'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('MCC'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('IC 95% Inf'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('IC 95% Sup'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('Accuracy'), 1, 0, 'C')
+            pdf.cell(30, 8, self.limpiar_texto_pdf('Interpretación'), 1, 1, 'C')
+
+            pdf.set_font('Arial', '', 8)
+            for arq in self.modelos.keys():
+                mcc = resultados_estadisticos['puntuaciones_mcc'][arq]
+                ci_inf, ci_sup = resultados_estadisticos['intervalos_confianza_mcc'][arq]
+                acc = resultados_estadisticos['puntuaciones_accuracy'][arq]
+                
+                pdf.cell(60, 6, self.limpiar_texto_pdf(self.informacion_arquitecturas[arq]['nombre_completo'][:25]), 1, 0)
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f'{mcc:.4f}'), 1, 0, 'C')
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f'{ci_inf:.4f}' if ci_inf else 'N/A'), 1, 0, 'C')
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f'{ci_sup:.4f}' if ci_sup else 'N/A'), 1, 0, 'C')
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f'{acc:.4f}'), 1, 0, 'C')
+                pdf.cell(30, 6, self.limpiar_texto_pdf(self.interpretar_mcc(mcc)[:15]), 1, 1, 'C')
+
+            # --- PRUEBAS DE MCNEMAR ---
+            pdf.ln(10)
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('PRUEBAS DE MCNEMAR - COMPARACIONES PAREADAS'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+
+            pdf.set_font('Arial', '', 10)
+            pdf.multi_cell(0, 4, self.limpiar_texto_pdf('La prueba de McNemar evalúa si existe diferencia estadísticamente significativa '
+                                        'entre el rendimiento de dos modelos (α = 0.05).'))
+            pdf.ln(3)
+
+            # Tabla McNemar
+            pdf.set_font('Arial', 'B', 9)
+            pdf.cell(50, 6, self.limpiar_texto_pdf('Comparación'), 1, 0, 'C')
+            pdf.cell(25, 6, self.limpiar_texto_pdf('Estadístico'), 1, 0, 'C')
+            pdf.cell(20, 6, self.limpiar_texto_pdf('p-valor'), 1, 0, 'C')
+            pdf.cell(20, 6, self.limpiar_texto_pdf('Significativo'), 1, 0, 'C')
+            pdf.cell(75, 6, self.limpiar_texto_pdf('Interpretación'), 1, 1, 'C')
+
+            pdf.set_font('Arial', '', 8)
+            for comp, resultado in resultados_estadisticos['resultados_mcnemar'].items():
+                if resultado:
+                    comp_text = comp.replace('_vs_', ' vs ').replace('_', ' ')
+                    pdf.cell(50, 5, self.limpiar_texto_pdf(comp_text[:20]), 1, 0)
+                    pdf.cell(25, 5, self.limpiar_texto_pdf(f'{resultado["estadistico"]:.4f}'), 1, 0, 'C')
+                    pdf.cell(20, 5, self.limpiar_texto_pdf(f'{resultado["valor_p"]:.4f}'), 1, 0, 'C')
+                    pdf.cell(20, 5, self.limpiar_texto_pdf('Sí' if resultado['significativo'] else 'No'), 1, 0, 'C')
+                    pdf.cell(75, 5, self.limpiar_texto_pdf(resultado['interpretacion'][:35]), 1, 1)
+
+            # --- CONCLUSIONES Y RECOMENDACIONES ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('CONCLUSIONES Y RECOMENDACIONES'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('1. RANKING DE MODELOS POR RENDIMIENTO ESTADÍSTICO:'), 0, 1)
+
+            # Ranking por MCC
+            ranking_mcc = sorted(resultados_estadisticos['puntuaciones_mcc'].items(), 
+                            key=lambda x: x[1], reverse=True)
+
+            pdf.set_font('Arial', '', 10)
+            for i, (arq, mcc) in enumerate(ranking_mcc, 1):
+                nombre_arq = self.informacion_arquitecturas[arq]['nombre_completo']
+                pdf.cell(0, 6, self.limpiar_texto_pdf(f'{i}. {nombre_arq}: MCC = {mcc:.4f} ({self.interpretar_mcc(mcc)})'), 0, 1)
+
+            pdf.ln(5)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('2. SIGNIFICANCIA ESTADÍSTICA:'), 0, 1)
+
+            pdf.set_font('Arial', '', 10)
+            if len(comparaciones_sig) == 0:
+                pdf.multi_cell(0, 5, self.limpiar_texto_pdf('No se encontraron diferencias estadísticamente significativas entre los modelos. '
+                                            'Esto sugiere que todos tienen rendimiento similar desde el punto de vista estadístico.'))
+            else:
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Se encontraron {len(comparaciones_sig)} diferencias significativas:'), 0, 1)
+                for comp in comparaciones_sig[:3]:  # Mostrar máximo 3
+                    resultado = resultados_estadisticos['resultados_mcnemar'][comp]
+                    pdf.cell(0, 4, self.limpiar_texto_pdf(f'• {comp.replace("_", " ")}: {resultado["interpretacion"][:50]}'), 0, 1)
+
+            pdf.ln(5)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('3. RECOMENDACIÓN FINAL:'), 0, 1)
+
+            pdf.set_font('Arial', '', 10)
+            if len(comparaciones_sig) > 0:
+                pdf.multi_cell(0, 5, self.limpiar_texto_pdf(f'Se recomienda el uso de {self.informacion_arquitecturas[mejor_mcc_arq]["nombre_completo"]} '
+                                            f'por su superior rendimiento estadístico (MCC = {mejor_mcc:.4f}) y evidencia '
+                                            'de diferencias significativas con otros modelos.'))
+            else:
+                pdf.multi_cell(0, 5, self.limpiar_texto_pdf('Dado que no hay diferencias estadísticamente significativas, la selección '
+                                            'puede basarse en otros criterios como velocidad, tamaño o eficiencia energética.'))
+
+            # --- INFORMACIÓN TÉCNICA ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('INFORMACIÓN TÉCNICA'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+
+            pdf.set_font('Arial', '', 10)
+            pdf.multi_cell(0, 5, self.limpiar_texto_pdf(f'''
+    METODOLOGÍA ESTADÍSTICA:
+
+    - Coeficiente de Correlación de Matthews (MCC):
+    - Métrica balanceada que considera verdaderos/falsos positivos y negativos
+    - Especialmente útil para datasets con clases desbalanceadas
+    - Más informativo que la accuracy tradicional
+
+    - Prueba de McNemar:
+    - Test estadístico pareado para comparar clasificadores
+    - H₀: No hay diferencia entre modelos
+    - H₁: Existe diferencia significativa (α = 0.05)
+    - Usa corrección de continuidad de Yates
+
+    - Intervalos de Confianza Bootstrap:
+    - Método no paramétrico para estimar incertidumbre
+    - 1000 muestras bootstrap por modelo
+    - Nivel de confianza: 95%
+
+    DATASET DE EVALUACIÓN:
+    - Total de imágenes: {len(resultados_evaluacion["etiquetas_verdaderas"])}
+    - Arquitecturas evaluadas: {len(self.modelos)}
+    - Clases únicas: {len(np.unique(resultados_evaluacion["etiquetas_verdaderas"]))}
+
+    LIMITACIONES:
+    - Los resultados son válidos para este dataset específico
+    - Se recomienda validación cruzada para mayor robustez
+    - El rendimiento puede variar con diferentes poblaciones
+            '''))
+            
+            # Generar archivo
+            marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo_pdf = f"reporte_estadistico_completo_{marca_tiempo}.pdf"  # ← CAMBIAR ESTA LÍNEA
+            pdf.output(nombre_archivo_pdf)
+        
+            return nombre_archivo_pdf
+            
+        except Exception as e:
+            st.error(f"Error generando reporte PDF estadístico: {str(e)}")
+            return None
     
     def crear_contenido_reporte_estadistico(self, resultados_estadisticos, resultados_evaluacion):
         """Crea contenido del reporte estadístico"""
         reporte = f"""
-REPORTE DE ANÁLISIS ESTADÍSTICO INFERENCIAL
-===========================================
+        REPORTE DE ANÁLISIS ESTADÍSTICO INFERENCIAL
+        ===========================================
 
-Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Sistema: Comparación de Arquitecturas CNN para Diagnóstico Ocular
-Número de modelos evaluados: {len(self.modelos)}
-Tamaño del dataset de prueba: {len(resultados_evaluacion['etiquetas_verdaderas'])}
+        Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Sistema: Comparación de Arquitecturas CNN para Diagnóstico Ocular
+        Número de modelos evaluados: {len(self.modelos)}
+        Tamaño del dataset de prueba: {len(resultados_evaluacion['etiquetas_verdaderas'])}
 
-1. COEFICIENTE DE CORRELACIÓN DE MATTHEWS (MCC)
-===============================================
+        1. COEFICIENTE DE CORRELACIÓN DE MATTHEWS (MCC)
+        ===============================================
 
-El MCC es una métrica balanceada que considera todas las categorías de la matriz de confusión.
-Rango: -1 (completamente incorrecto) a +1 (predicción perfecta)
+        El MCC es una métrica balanceada que considera todas las categorías de la matriz de confusión.
+        Rango: -1 (completamente incorrecto) a +1 (predicción perfecta)
 
-"""
+        """
         
         # Resultados MCC
         for arq in self.modelos.keys():
@@ -1183,7 +1542,128 @@ Arquitecturas evaluadas:
         
         return reporte
     
-    # ========== FUNCIONES ORIGINALES (MANTENER TODAS) ==========
+    # ========== FUNCIONES ORIGINALES TRADUCIDAS ==========
+    
+    def calcular_curvas_roc(self, resultados_evaluacion):
+        """Calcula curvas ROC para cada modelo"""
+        try:
+            y_verdadero = resultados_evaluacion['etiquetas_verdaderas']
+            n_clases = len(np.unique(y_verdadero))
+            
+            # Binarizar las etiquetas para ROC multiclase
+            y_verdadero_bin = label_binarize(y_verdadero, classes=range(n_clases))
+            
+            curvas_roc = {}
+            
+            for arq in self.modelos.keys():
+                # Obtener probabilidades de predicción
+                probabilidades = []
+                for i, pred in enumerate(resultados_evaluacion['predicciones'][arq]):
+                    # Crear vector de probabilidades one-hot simulado
+                    prob_vec = np.zeros(n_clases)
+                    prob_vec[pred] = resultados_evaluacion['confianzas'][arq][i]
+                    # Distribuir probabilidad restante
+                    prob_restante = (1 - resultados_evaluacion['confianzas'][arq][i]) / (n_clases - 1)
+                    for j in range(n_clases):
+                        if j != pred:
+                            prob_vec[j] = prob_restante
+                    probabilidades.append(prob_vec)
+                
+                probabilidades = np.array(probabilidades)
+                
+                # Calcular ROC para cada clase
+                fpr = {}
+                tpr = {}
+                roc_auc = {}
+                
+                for i in range(n_clases):
+                    if n_clases == 2:
+                        fpr[i], tpr[i], _ = roc_curve(y_verdadero_bin, probabilidades[:, 1])
+                    else:
+                        fpr[i], tpr[i], _ = roc_curve(y_verdadero_bin[:, i], probabilidades[:, i])
+                    roc_auc[i] = auc(fpr[i], tpr[i])
+                
+                # ROC micro-average
+                if n_clases > 2:
+                    fpr["micro"], tpr["micro"], _ = roc_curve(y_verdadero_bin.ravel(), probabilidades.ravel())
+                    roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+                
+                curvas_roc[arq] = {
+                    'fpr': fpr,
+                    'tpr': tpr,
+                    'roc_auc': roc_auc,
+                    'n_clases': n_clases
+                }
+            
+            return curvas_roc
+        
+        except Exception as e:
+            st.error(f"Error calculando curvas ROC: {str(e)}")
+            return None
+    
+    def graficar_curvas_roc(self, curvas_roc, timestamp=None):
+        """Grafica curvas ROC comparativas"""
+        try:
+            if timestamp is None:
+                import time
+                timestamp = str(int(time.time() * 1000))
+            
+            fig_roc = go.Figure()
+            
+            # Colores para cada arquitectura
+            colores = ['#E91E63', '#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
+            
+            for i, (arq, datos_roc) in enumerate(curvas_roc.items()):
+                color = colores[i % len(colores)]
+                info_arq = self.informacion_arquitecturas[arq]
+                
+                if datos_roc['n_clases'] == 2:
+                    # ROC binario
+                    fpr = datos_roc['fpr'][1]
+                    tpr = datos_roc['tpr'][1]
+                    auc_score = datos_roc['roc_auc'][1]
+                    
+                    fig_roc.add_trace(go.Scatter(
+                        x=fpr, y=tpr,
+                        mode='lines',
+                        name=f"{arq.replace('_', ' ')} (AUC = {auc_score:.3f})",
+                        line=dict(color=color, width=3)
+                    ))
+                else:
+                    # ROC multiclase - mostrar micro-average
+                    fpr = datos_roc['fpr']["micro"]
+                    tpr = datos_roc['tpr']["micro"]
+                    auc_score = datos_roc['roc_auc']["micro"]
+                    
+                    fig_roc.add_trace(go.Scatter(
+                        x=fpr, y=tpr,
+                        mode='lines',
+                        name=f"{arq.replace('_', ' ')} (AUC = {auc_score:.3f})",
+                        line=dict(color=color, width=3)
+                    ))
+            
+            # Línea diagonal (clasificador aleatorio)
+            fig_roc.add_trace(go.Scatter(
+                x=[0, 1], y=[0, 1],
+                mode='lines',
+                name='Clasificador Aleatorio (AUC = 0.500)',
+                line=dict(color='gray', width=2, dash='dash')
+            ))
+            
+            fig_roc.update_layout(
+                title='📈 Curvas ROC - Comparación de Arquitecturas',
+                xaxis_title='Tasa de Falsos Positivos (1 - Especificidad)',
+                yaxis_title='Tasa de Verdaderos Positivos (Sensibilidad)',
+                width=800,
+                height=600,
+                legend=dict(x=0.6, y=0.1)
+            )
+            
+            st.plotly_chart(fig_roc, use_container_width=True, key=f"curvas_roc_{timestamp}")
+            
+        except Exception as e:
+            st.error(f"Error graficando curvas ROC: {str(e)}")
+    
     
     def encontrar_mejor_arquitectura(self, predicciones):
         """Encuentra la mejor arquitectura por diferentes métricas"""
@@ -1212,14 +1692,14 @@ Arquitecturas evaluadas:
         }
     
     def mostrar_encabezado(self):
-        """Header de la aplicación"""
-        st.title("🏆 DETECCION DE ENFERMEDADES OCULARES 👁️")
-        st.subheader("MobileNetV2 vs EfficientNet-B0 vs ResNet-50 V2 + Análisis Estadístico")
+        """Header de la aplicación - TRADUCIDO"""
+        st.title(get_text('main_title', self.lang))
+        st.subheader(get_text('page_subtitle', self.lang))
         st.markdown("---")
-    
+        
     def mostrar_vitrina_arquitecturas(self):
-        """Muestra las características de cada arquitectura"""
-        st.header("🏗️ LAS 3 ARQUITECTURAS EN COMPETENCIA")
+        """Muestra las características de cada arquitectura - TRADUCIDA"""
+        st.header(get_text('architectures_title', self.lang))
         
         cols = st.columns(3)
         
@@ -1232,22 +1712,22 @@ Arquitecturas evaluadas:
                 st.info(f"**{info['descripcion']}**")
                 
                 # Características técnicas
-                st.markdown("**📊 Características:**")
-                st.markdown(f"• **Tipo:** {info['caracteristicas']['Tipo']}")
-                st.markdown(f"• **Parámetros:** {info['caracteristicas']['Parámetros']}")
-                st.markdown(f"• **Ventaja:** {info['caracteristicas']['Ventaja principal']}")
-                st.markdown(f"• **Año:** {info['caracteristicas']['Año']}")
+                st.markdown(f"**📊 {get_text('characteristics', self.lang)}:**")
+                st.markdown(f"• **{get_text('type', self.lang)}:** {info['caracteristicas']['Tipo']}")
+                st.markdown(f"• **{get_text('parameters_count', self.lang)}:** {info['caracteristicas']['Parámetros']}")
+                st.markdown(f"• **{get_text('main_advantage', self.lang)}:** {info['caracteristicas']['Ventaja principal']}")
+                st.markdown(f"• **{get_text('year', self.lang)}:** {info['caracteristicas']['Año']}")
                 
                 # Ventajas
-                st.markdown("**✅ Ventajas:**")
+                st.markdown(f"**✅ {get_text('advantages', self.lang)}:**")
                 for ventaja in info['ventajas']:
                     st.markdown(f"• {ventaja}")
                 
                 st.markdown("---")
     
     def mostrar_resultados_prediccion(self, predicciones):
-        """Muestra resultados de las 3 arquitecturas lado a lado"""
-        st.header("🎯 RESULTADOS DE PREDICCIÓN")
+        """Muestra resultados de las 3 arquitecturas lado a lado - TRADUCIDA"""
+        st.header(get_text('results_title', self.lang))
         
         cols = st.columns(3)
         
@@ -1264,26 +1744,26 @@ Arquitecturas evaluadas:
                 info_clase = self.informacion_clases.get(clase_predicha, {})
                 nombre_es = info_clase.get('nombre', clase_predicha)
                 
-                st.success(f"**Diagnóstico:** {nombre_es}")
+                st.success(get_text('diagnosis', self.lang, diagnosis=nombre_es))
                 
                 # Confianza (métrica principal)
                 st.metric(
-                    label="🎯 Confianza",
+                    label=get_text('confidence', self.lang),
                     value=f"{pred['confianza']:.1%}",
                     delta=None
                 )
                 
                 # Métricas técnicas
-                st.markdown("**📊 Métricas Técnicas:**")
-                st.markdown(f"⏱️ **Tiempo:** {pred['tiempo_prediccion']:.3f}s")
-                st.markdown(f"💾 **Tamaño:** {pred['tamaño_modelo']:.1f}MB")
-                st.markdown(f"🔢 **Parámetros:** {pred['conteo_parametros']:,}")
+                st.markdown(get_text('technical_metrics', self.lang))
+                st.markdown(get_text('time', self.lang, time=pred['tiempo_prediccion']))
+                st.markdown(get_text('size', self.lang, size=pred['tamaño_modelo']))
+                st.markdown(get_text('parameters', self.lang, params=pred['conteo_parametros']))
                 
                 st.markdown("---")
     
     def mostrar_comparacion_rendimiento(self, predicciones):
-        """Gráficos comparativos de rendimiento"""
-        st.markdown("## 📊 ANÁLISIS COMPARATIVO DE RENDIMIENTO")
+        """Gráficos comparativos de rendimiento - TRADUCIDA"""
+        st.markdown(f"## {get_text('comparison_title', self.lang)}")
         
         # Crear timestamp único
         import time
@@ -1292,12 +1772,12 @@ Arquitecturas evaluadas:
         # Crear DataFrame para gráficos
         df = pd.DataFrame([
             {
-                'Arquitectura': pred['arquitectura'].replace('_', ' '),
-                'Confianza': pred['confianza'],
-                'Tiempo (s)': pred['tiempo_prediccion'],
-                'Tamaño (MB)': pred['tamaño_modelo'],
-                'Parámetros (M)': pred['conteo_parametros'] / 1_000_000,
-                'Eficiencia (Conf/Tiempo)': pred['confianza'] / pred['tiempo_prediccion']
+                get_text('architecture', self.lang): pred['arquitectura'].replace('_', ' '),
+                get_text('confidence', self.lang): pred['confianza'],
+                f"{get_text('time_table', self.lang)} (s)": pred['tiempo_prediccion'],
+                f"{get_text('size_table', self.lang)} (MB)": pred['tamaño_modelo'],
+                f"{get_text('parameters_table', self.lang)} (M)": pred['conteo_parametros'] / 1_000_000,
+                f"{get_text('efficiency_table', self.lang)} (Conf/Tiempo)": pred['confianza'] / pred['tiempo_prediccion']
             }
             for pred in predicciones
         ])
@@ -1312,16 +1792,16 @@ Arquitecturas evaluadas:
             # Gráfico de confianza
             fig_conf = go.Figure(data=[
                 go.Bar(
-                    x=df['Arquitectura'],
-                    y=df['Confianza'],
-                    text=[f"{conf:.1%}" for conf in df['Confianza']],
+                    x=df[get_text('architecture', self.lang)],
+                    y=df[get_text('confidence', self.lang)],
+                    text=[f"{conf:.1%}" for conf in df[get_text('confidence', self.lang)]],
                     textposition='auto',
                     marker_color=colores,
-                    name='Confianza'
+                    name=get_text('confidence', self.lang)
                 )
             ])
             fig_conf.update_layout(
-                title='🎯 Confianza de Predicción',
+                title=get_text('confidence_chart', self.lang),
                 yaxis=dict(tickformat='.0%'),
                 height=400
             )
@@ -1330,17 +1810,17 @@ Arquitecturas evaluadas:
             # Gráfico de tamaño
             fig_tamaño = go.Figure(data=[
                 go.Bar(
-                    x=df['Arquitectura'],
-                    y=df['Tamaño (MB)'],
-                    text=[f"{tamaño:.1f}MB" for tamaño in df['Tamaño (MB)']],
+                    x=df[get_text('architecture', self.lang)],
+                    y=df[f"{get_text('size_table', self.lang)} (MB)"],
+                    text=[f"{tamaño:.1f}MB" for tamaño in df[f"{get_text('size_table', self.lang)} (MB)"]],
                     textposition='auto',
                     marker_color=colores,
-                    name='Tamaño'
+                    name=get_text('size_table', self.lang)
                 )
             ])
             fig_tamaño.update_layout(
-                title='💾 Tamaño del Modelo',
-                yaxis_title='Tamaño (MB)',
+                title=get_text('size_chart', self.lang),
+                yaxis_title=f"{get_text('size_table', self.lang)} (MB)",
                 height=400
             )
             st.plotly_chart(fig_tamaño, use_container_width=True, key=f"grafico_tamaño_{timestamp}")
@@ -1349,17 +1829,17 @@ Arquitecturas evaluadas:
             # Gráfico de tiempo
             fig_tiempo = go.Figure(data=[
                 go.Bar(
-                    x=df['Arquitectura'],
-                    y=df['Tiempo (s)'],
-                    text=[f"{tiempo:.3f}s" for tiempo in df['Tiempo (s)']],
+                    x=df[get_text('architecture', self.lang)],
+                    y=df[f"{get_text('time_table', self.lang)} (s)"],
+                    text=[f"{tiempo:.3f}s" for tiempo in df[f"{get_text('time_table', self.lang)} (s)"]],
                     textposition='auto',
                     marker_color=colores,
-                    name='Tiempo'
+                    name=get_text('time_table', self.lang)
                 )
             ])
             fig_tiempo.update_layout(
-                title='⏱️ Tiempo de Predicción',
-                yaxis_title='Tiempo (segundos)',
+                title=get_text('time_chart', self.lang),
+                yaxis_title=f"{get_text('time_table', self.lang)} (segundos)",
                 height=400
             )
             st.plotly_chart(fig_tiempo, use_container_width=True, key=f"grafico_tiempo_{timestamp}")
@@ -1367,24 +1847,24 @@ Arquitecturas evaluadas:
             # Gráfico de eficiencia
             fig_eff = go.Figure(data=[
                 go.Bar(
-                    x=df['Arquitectura'],
-                    y=df['Eficiencia (Conf/Tiempo)'],
-                    text=[f"{eff:.1f}" for eff in df['Eficiencia (Conf/Tiempo)']],
+                    x=df[get_text('architecture', self.lang)],
+                    y=df[f"{get_text('efficiency_table', self.lang)} (Conf/Tiempo)"],
+                    text=[f"{eff:.1f}" for eff in df[f"{get_text('efficiency_table', self.lang)} (Conf/Tiempo)"]],
                     textposition='auto',
                     marker_color=colores,
-                    name='Eficiencia'
+                    name=get_text('efficiency_table', self.lang)
                 )
             ])
             fig_eff.update_layout(
-                title='⚡ Eficiencia (Confianza/Tiempo)',
-                yaxis_title='Eficiencia Score',
+                title=get_text('efficiency_chart', self.lang),
+                yaxis_title=f"{get_text('efficiency_table', self.lang)} Score",
                 height=400
             )
             st.plotly_chart(fig_eff, use_container_width=True, key=f"grafico_eficiencia_{timestamp}")
     
     def mostrar_comparacion_radar(self, predicciones):
-        """Gráfico radar comparando todas las métricas"""
-        st.markdown("### 🕸️ Comparación Multidimensional")
+        """Gráfico radar comparando todas las métricas - TRADUCIDA"""
+        st.markdown(f"### {get_text('radar_title', self.lang)}")
         
         # Crear timestamp único
         import time
@@ -1399,7 +1879,12 @@ Arquitecturas evaluadas:
         
         fig = go.Figure()
         
-        categorias = ['Confianza', 'Velocidad', 'Eficiencia Memoria', 'Score General']
+        categorias = [
+            get_text('confidence', self.lang), 
+            'Velocidad', 
+            'Eficiencia Memoria', 
+            'Score General'
+        ]
         
         for pred in predicciones:
             nombre_arq = pred['arquitectura']
@@ -1428,21 +1913,21 @@ Arquitecturas evaluadas:
                     range=[0, 1],
                     tickformat='.0%'
                 )),
-            title="🕸️ Perfil Multidimensional de Arquitecturas",
+            title=get_text('radar_chart', self.lang),
             height=500
         )
         
         st.plotly_chart(fig, use_container_width=True, key=f"grafico_radar_{timestamp}")
     
     def mostrar_podio_ganadores(self, mejores_modelos):
-        """Muestra el podio de ganadores por categoría"""
-        st.header("🏆 PODIO DE GANADORES")
+        """Muestra el podio de ganadores por categoría - TRADUCIDA"""
+        st.header(get_text('winners_title', self.lang))
         
         categorias = [
-            ('mayor_confianza', '🎯 Mayor Confianza', 'El más preciso'),
-            ('mas_rapido', '⚡ Más Rápido', 'El velocista'),
-            ('mas_ligero', '🪶 Más Ligero', 'El eficiente'),
-            ('mas_eficiente', '⚖️ Más Eficiente', 'El balanceado')
+            ('mayor_confianza', get_text('highest_confidence', self.lang), get_text('most_accurate', self.lang)),
+            ('mas_rapido', get_text('fastest', self.lang), get_text('speedster', self.lang)),
+            ('mas_ligero', get_text('lightest', self.lang), get_text('efficient', self.lang)),
+            ('mas_eficiente', get_text('most_efficient', self.lang), get_text('balanced', self.lang))
         ]
         
         cols = st.columns(2)
@@ -1476,8 +1961,8 @@ Arquitecturas evaluadas:
                         st.error(f"**{titulo}**\n\n{info['icon']} **{nombre_arq.replace('_', ' ')}**\n\n{valor_metrica}\n\n*{subtitulo}*")
     
     def mostrar_analisis_detallado(self, predicciones, mejores_modelos):
-        """Análisis detallado y recomendaciones"""
-        st.markdown("## 🔬 ANÁLISIS DETALLADO")
+        """Análisis detallado y recomendaciones - TRADUCIDA"""
+        st.markdown(f"## {get_text('detailed_analysis_title', self.lang)}")
         
         # Encontrar el mejor general (combinación de métricas)
         for pred in predicciones:
@@ -1499,15 +1984,15 @@ Arquitecturas evaluadas:
         info = self.informacion_arquitecturas[nombre_arq]
         
         st.balloons()  # Celebración!
-        st.success(f"## 👑 GANADOR GENERAL: {info['icon']} {nombre_arq.replace('_', ' ')}")
+        st.success(get_text('general_winner', self.lang, name=f"{info['icon']} {nombre_arq.replace('_', ' ')}"))
         st.metric(
-            label="🏆 Score General",
+            label=get_text('general_score', self.lang),
             value=f"{mejor_general['score_general']:.3f}",
-            delta="¡El mejor balance de todas las métricas!"
+            delta=get_text('best_balance', self.lang)
         )
         
         # Análisis por arquitectura
-        st.markdown("### 📋 Fortalezas y Debilidades")
+        st.markdown(f"### {get_text('strengths_weaknesses', self.lang)}")
         
         for pred in predicciones:
             nombre_arq = pred['arquitectura']
@@ -1517,7 +2002,7 @@ Arquitecturas evaluadas:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("**🟢 Fortalezas:**")
+                    st.markdown(get_text('strengths', self.lang))
                     fortalezas = []
                     
                     if pred == mejores_modelos.get('mayor_confianza'):
@@ -1537,7 +2022,7 @@ Arquitecturas evaluadas:
                         st.markdown(fortaleza)
                 
                 with col2:
-                    st.markdown("**🔴 Áreas de mejora:**")
+                    st.markdown(get_text('weaknesses', self.lang))
                     debilidades = []
                     
                     if pred != mejores_modelos.get('mayor_confianza'):
@@ -1551,9 +2036,9 @@ Arquitecturas evaluadas:
                         st.markdown(debilidad)
                 
                 # Métricas técnicas
-                st.markdown("**📊 Métricas Técnicas:**")
+                st.markdown(get_text('technical_details', self.lang))
                 st.markdown(f"""
-                - **Parámetros**: {pred['conteo_parametros']:,}
+                - **{get_text('parameters_count', self.lang)}**: {pred['conteo_parametros']:,}
                 - **Tiempo de predicción**: {pred['tiempo_prediccion']:.3f}s
                 - **Tamaño del modelo**: {pred['tamaño_modelo']:.1f}MB
                 - **Eficiencia**: {pred['eficiencia']:.1f} (confianza/tiempo)
@@ -1561,61 +2046,51 @@ Arquitecturas evaluadas:
                 """)
         
         # Recomendaciones de uso
-        st.markdown("### 💡 RECOMENDACIONES DE USO")
+        st.markdown(f"### {get_text('usage_recommendations', self.lang)}")
         
         rec_col1, rec_col2, rec_col3 = st.columns(3)
         
         with rec_col1:
-            st.markdown("""
-            **🏥 Aplicaciones Clínicas:**
-            - Usa el modelo con **mayor confianza**
-            - Prioriza precisión sobre velocidad
-            - Ideal para diagnósticos complejos
-            """)
+            st.markdown(get_text('clinical_apps', self.lang))
+            st.markdown(get_text('clinical_desc', self.lang))
         
         with rec_col2:
-            st.markdown("""
-            **📱 Aplicaciones Móviles:**
-            - Usa el modelo **más rápido y ligero**
-            - Balance entre precisión y recursos
-            - Ideal para apps en tiempo real
-            """)
+            st.markdown(get_text('mobile_apps', self.lang))
+            st.markdown(get_text('mobile_desc', self.lang))
         
         with rec_col3:
-            st.markdown("""
-            **🔄 Sistemas de Producción:**
-            - Usa el modelo **más eficiente**
-            - Considera el volumen de procesamiento
-            - Ideal para escalabilidad
-            """)
+            st.markdown(get_text('production_apps', self.lang))
+            st.markdown(get_text('production_desc', self.lang))
 
-    
     def generar_reporte_pdf_completo(self, predicciones, imagen, marca_tiempo_analisis):
-        """Genera reporte PDF profesional completo"""
+        """Genera reporte PDF profesional completo con gráficos"""
         try:
             # Crear PDF
             pdf = FPDF()
             pdf.add_page()
             
+            # Lista para archivos temporales
+            archivos_temporales = []
+            
             # --- PORTADA ---
             pdf.set_font('Arial', 'B', 20)
-            pdf.cell(0, 15, 'REPORTE DE DIAGNÓSTICO OCULAR AVANZADO', 0, 1, 'C')
+            pdf.cell(0, 15, self.limpiar_texto_pdf('REPORTE DE DIAGNÓSTICO OCULAR AVANZADO'), 0, 1, 'C')
             pdf.ln(5)
             
             pdf.set_font('Arial', 'B', 14)
-            pdf.cell(0, 10, 'Sistema Multi-Arquitectura CNN', 0, 1, 'C')
+            pdf.cell(0, 10, self.limpiar_texto_pdf('Sistema Multi-Arquitectura CNN'), 0, 1, 'C')
             pdf.ln(10)
             
             # Información general
             pdf.set_font('Arial', '', 12)
-            pdf.cell(0, 8, f'Fecha del análisis: {marca_tiempo_analisis}', 0, 1)
-            pdf.cell(0, 8, f'Arquitecturas analizadas: {len(predicciones)}', 0, 1)
-            pdf.cell(0, 8, f'Enfermedades detectables: 10 patologías especializadas', 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Fecha del análisis: {marca_tiempo_analisis}'), 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Arquitecturas analizadas: {len(predicciones)}'), 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('Enfermedades detectables: 10 patologías especializadas'), 0, 1)
             pdf.ln(10)
             
             # --- RESUMEN EJECUTIVO ---
             pdf.set_font('Arial', 'B', 14)
-            pdf.cell(0, 10, 'RESUMEN EJECUTIVO', 0, 1)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('RESUMEN EJECUTIVO'), 0, 1)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(5)
             
@@ -1624,15 +2099,426 @@ Arquitecturas evaluadas:
             info_ganador = self.informacion_arquitecturas[mejor_general['arquitectura']]
             
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, f'ARQUITECTURA RECOMENDADA: {info_ganador["nombre_completo"]}', 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'ARQUITECTURA RECOMENDADA: {info_ganador["nombre_completo"]}'), 0, 1)
             
             pdf.set_font('Arial', '', 11)
             clase_predicha = mejor_general['clase_predicha']
             info_clase = self.informacion_clases.get(clase_predicha, {})
             
-            pdf.cell(0, 6, f'Diagnóstico principal: {info_clase.get("nombre", clase_predicha)}', 0, 1)
-            pdf.cell(0, 6, f'Nivel de confianza: {mejor_general["confianza"]:.1%}', 0, 1)
-            pdf.cell(0, 6, f'Gravedad: {info_clase.get("gravedad", "No especificada")}', 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Diagnóstico principal: {info_clase.get("nombre", clase_predicha)}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Nivel de confianza: {mejor_general["confianza"]:.1%}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Gravedad: {info_clase.get("gravedad", "No especificada")}'), 0, 1)
+            pdf.ln(8)
+            
+            # Agregar imagen analizada
+            try:
+                if imagen is not None:
+                    nombre_img_temp = f"temp_img_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    archivos_temporales.append(nombre_img_temp)
+                    
+                    if hasattr(imagen, 'save'):
+                        imagen_rgb = imagen.convert('RGB')
+                        imagen_rgb.save(nombre_img_temp, 'JPEG', quality=85)
+                    else:
+                        import matplotlib.pyplot as plt
+                        fig, ax = plt.subplots(1, 1, figsize=(4, 3))
+                        ax.text(0.5, 0.5, 'Imagen Analizada', ha='center', va='center', fontsize=14)
+                        ax.set_xlim(0, 1)
+                        ax.set_ylim(0, 1)
+                        ax.axis('off')
+                        plt.savefig(nombre_img_temp, dpi=150, bbox_inches='tight')
+                        plt.close()
+                    
+                    pdf.cell(0, 10, self.limpiar_texto_pdf('IMAGEN ANALIZADA:'), 0, 1)
+                    pdf.image(nombre_img_temp, w=80)
+                    pdf.ln(5)
+                    
+            except Exception as error_img:
+                pdf.set_font('Arial', 'I', 10)
+                pdf.cell(0, 6, self.limpiar_texto_pdf(f'[Imagen no disponible: {str(error_img)[:50]}...]'), 0, 1)
+                pdf.ln(5)
+            
+            # --- NUEVA PÁGINA: COMPARACIÓN DE ARQUITECTURAS ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('COMPARACIÓN DE ARQUITECTURAS CNN'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+            
+            # Tabla comparativa
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(50, 8, self.limpiar_texto_pdf('Arquitectura'), 1, 0, 'C')
+            pdf.cell(35, 8, self.limpiar_texto_pdf('Confianza'), 1, 0, 'C')
+            pdf.cell(30, 8, self.limpiar_texto_pdf('Tiempo (ms)'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('Tamaño (MB)'), 1, 0, 'C')
+            pdf.cell(30, 8, self.limpiar_texto_pdf('Eficiencia'), 1, 1, 'C')
+            
+            pdf.set_font('Arial', '', 9)
+            for pred in predicciones:
+                nombre_arq = pred['arquitectura'].replace('_', ' ')
+                pdf.cell(50, 6, self.limpiar_texto_pdf(nombre_arq), 1, 0)
+                pdf.cell(35, 6, self.limpiar_texto_pdf(f"{pred['confianza']:.1%}"), 1, 0, 'C')
+                pdf.cell(30, 6, self.limpiar_texto_pdf(f"{pred['tiempo_prediccion']*1000:.1f}"), 1, 0, 'C')
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f"{pred['tamaño_modelo']:.1f}"), 1, 0, 'C')
+                pdf.cell(30, 6, self.limpiar_texto_pdf(f"{pred.get('eficiencia', 0):.1f}"), 1, 1, 'C')
+            
+            pdf.ln(10)
+            
+            # --- GRÁFICOS DE RENDIMIENTO ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('ANÁLISIS GRÁFICO DE RENDIMIENTO'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+            
+            # Generar gráficos de comparación
+            try:
+                import matplotlib.pyplot as plt
+                import numpy as np
+                
+                # Crear DataFrame para gráficos
+                df_datos = pd.DataFrame([
+                    {
+                        'Arquitectura': pred['arquitectura'].replace('_', ' '),
+                        'Confianza': pred['confianza'],
+                        'Tiempo': pred['tiempo_prediccion'],
+                        'Tamaño': pred['tamaño_modelo'],
+                        'Eficiencia': pred.get('eficiencia', 0)
+                    }
+                    for pred in predicciones
+                ])
+                
+                # Colores para gráficos
+                colores = [self.informacion_arquitecturas[pred['arquitectura']]['color'] for pred in predicciones]
+                
+                # 1. Gráfico de Confianza
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(df_datos['Arquitectura'], df_datos['Confianza'], color=colores)
+                ax.set_title('Comparación de Confianza por Arquitectura', fontsize=16, fontweight='bold')
+                ax.set_ylabel('Confianza (%)')
+                ax.set_ylim(0, 1)
+                
+                # Agregar valores en las barras
+                for bar, conf in zip(bars, df_datos['Confianza']):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
+                        f'{conf:.1%}', ha='center', va='bottom', fontweight='bold')
+                
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                nombre_grafico_conf = f"grafico_confianza_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_conf, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_conf)
+                plt.close()
+                
+                pdf.cell(0, 8, self.limpiar_texto_pdf('1. ANÁLISIS DE CONFIANZA'), 0, 1)
+                pdf.image(nombre_grafico_conf, w=180)
+                pdf.ln(5)
+                
+                # 2. Gráfico de Tiempo
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(df_datos['Arquitectura'], df_datos['Tiempo'] * 1000, color=colores)
+                ax.set_title('Comparación de Tiempo de Respuesta por Arquitectura', fontsize=16, fontweight='bold')
+                ax.set_ylabel('Tiempo (ms)')
+                
+                for bar, tiempo in zip(bars, df_datos['Tiempo']):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                        f'{tiempo*1000:.1f}ms', ha='center', va='bottom', fontweight='bold')
+                
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                nombre_grafico_tiempo = f"grafico_tiempo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_tiempo, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_tiempo)
+                plt.close()
+                
+                pdf.add_page()
+                pdf.cell(0, 8, self.limpiar_texto_pdf('2. ANÁLISIS DE VELOCIDAD'), 0, 1)
+                pdf.image(nombre_grafico_tiempo, w=180)
+                pdf.ln(5)
+                
+                # 3. Gráfico de Tamaño
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(df_datos['Arquitectura'], df_datos['Tamaño'], color=colores)
+                ax.set_title('Comparación de Tamaño de Modelo por Arquitectura', fontsize=16, fontweight='bold')
+                ax.set_ylabel('Tamaño (MB)')
+                
+                for bar, tamaño in zip(bars, df_datos['Tamaño']):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                        f'{tamaño:.1f}MB', ha='center', va='bottom', fontweight='bold')
+                
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                nombre_grafico_tamaño = f"grafico_tamaño_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_tamaño, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_tamaño)
+                plt.close()
+                
+                pdf.add_page()
+                pdf.cell(0, 8, self.limpiar_texto_pdf('3. ANÁLISIS DE EFICIENCIA DE MEMORIA'), 0, 1)
+                pdf.image(nombre_grafico_tamaño, w=180)
+                pdf.ln(5)
+                
+                # 4. Gráfico de Eficiencia
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(df_datos['Arquitectura'], df_datos['Eficiencia'], color=colores)
+                ax.set_title('Comparación de Eficiencia por Arquitectura', fontsize=16, fontweight='bold')
+                ax.set_ylabel('Eficiencia (Confianza/Tiempo)')
+                
+                for bar, eficiencia in zip(bars, df_datos['Eficiencia']):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                        f'{eficiencia:.1f}', ha='center', va='bottom', fontweight='bold')
+                
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                nombre_grafico_eficiencia = f"grafico_eficiencia_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_eficiencia, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_eficiencia)
+                plt.close()
+                
+                pdf.add_page()
+                pdf.cell(0, 8, self.limpiar_texto_pdf('4. ANÁLISIS DE EFICIENCIA GENERAL'), 0, 1)
+                pdf.image(nombre_grafico_eficiencia, w=180)
+                pdf.ln(5)
+                
+                # 5. Gráfico Radar
+                fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
+                
+                # Normalizar métricas para el radar
+                max_conf = max(pred['confianza'] for pred in predicciones)
+                min_tiempo = min(pred['tiempo_prediccion'] for pred in predicciones)
+                max_tiempo = max(pred['tiempo_prediccion'] for pred in predicciones)
+                min_tamaño = min(pred['tamaño_modelo'] for pred in predicciones)
+                max_tamaño = max(pred['tamaño_modelo'] for pred in predicciones)
+                
+                categorias = ['Confianza', 'Velocidad', 'Eficiencia Memoria', 'Score General']
+                N = len(categorias)
+                
+                # Ángulos para cada categoría
+                angles = [n / float(N) * 2 * np.pi for n in range(N)]
+                angles += angles[:1]  # Cerrar el círculo
+                
+                for i, pred in enumerate(predicciones):
+                    # Normalizar valores
+                    norm_conf = pred['confianza'] / max_conf if max_conf > 0 else 0
+                    norm_velocidad = (max_tiempo - pred['tiempo_prediccion']) / (max_tiempo - min_tiempo) if max_tiempo > min_tiempo else 1
+                    norm_memoria = (max_tamaño - pred['tamaño_modelo']) / (max_tamaño - min_tamaño) if max_tamaño > min_tamaño else 1
+                    norm_general = (norm_conf + norm_velocidad + norm_memoria) / 3
+                    
+                    valores = [norm_conf, norm_velocidad, norm_memoria, norm_general]
+                    valores += valores[:1]  # Cerrar el círculo
+                    
+                    ax.plot(angles, valores, 'o-', linewidth=2, 
+                        label=pred['arquitectura'].replace('_', ' '), 
+                        color=self.informacion_arquitecturas[pred['arquitectura']]['color'])
+                    ax.fill(angles, valores, alpha=0.25, 
+                        color=self.informacion_arquitecturas[pred['arquitectura']]['color'])
+                
+                ax.set_xticks(angles[:-1])
+                ax.set_xticklabels(categorias)
+                ax.set_ylim(0, 1)
+                ax.set_title('Análisis Radar Comparativo', size=16, fontweight='bold', pad=20)
+                ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0))
+                ax.grid(True)
+                
+                plt.tight_layout()
+                
+                nombre_grafico_radar = f"grafico_radar_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_radar, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_radar)
+                plt.close()
+                
+                pdf.add_page()
+                pdf.cell(0, 8, self.limpiar_texto_pdf('5. ANÁLISIS RADAR COMPARATIVO'), 0, 1)
+                pdf.image(nombre_grafico_radar, w=180)
+                pdf.ln(5)
+                
+                # 6. Gráfico de Barras Comparativo General
+                fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+                
+                # Confianza
+                ax1.bar(df_datos['Arquitectura'], df_datos['Confianza'], color=colores)
+                ax1.set_title('Confianza', fontweight='bold')
+                ax1.set_ylabel('Confianza (%)')
+                ax1.tick_params(axis='x', rotation=45)
+                
+                # Tiempo
+                ax2.bar(df_datos['Arquitectura'], df_datos['Tiempo'] * 1000, color=colores)
+                ax2.set_title('Tiempo de Respuesta', fontweight='bold')
+                ax2.set_ylabel('Tiempo (ms)')
+                ax2.tick_params(axis='x', rotation=45)
+                
+                # Tamaño
+                ax3.bar(df_datos['Arquitectura'], df_datos['Tamaño'], color=colores)
+                ax3.set_title('Tamaño del Modelo', fontweight='bold')
+                ax3.set_ylabel('Tamaño (MB)')
+                ax3.tick_params(axis='x', rotation=45)
+                
+                # Eficiencia
+                ax4.bar(df_datos['Arquitectura'], df_datos['Eficiencia'], color=colores)
+                ax4.set_title('Eficiencia', fontweight='bold')
+                ax4.set_ylabel('Eficiencia')
+                ax4.tick_params(axis='x', rotation=45)
+                
+                plt.suptitle('Comparación Completa de Métricas', fontsize=16, fontweight='bold')
+                plt.tight_layout()
+                
+                nombre_grafico_completo = f"grafico_completo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(nombre_grafico_completo, dpi=300, bbox_inches='tight')
+                archivos_temporales.append(nombre_grafico_completo)
+                plt.close()
+                
+                pdf.add_page()
+                pdf.cell(0, 8, self.limpiar_texto_pdf('6. COMPARACIÓN COMPLETA DE MÉTRICAS'), 0, 1)
+                pdf.image(nombre_grafico_completo, w=180)
+                pdf.ln(5)
+                
+            except Exception as e:
+                pdf.set_font('Arial', '', 10)
+                pdf.cell(0, 6, self.limpiar_texto_pdf(f'Error generando gráficos: {str(e)}'), 0, 1)
+            
+            # --- ANÁLISIS CLÍNICO DETALLADO ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('ANÁLISIS CLÍNICO DETALLADO'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+            
+            # Para cada predicción única
+            diagnosticos_unicos = list(set(pred['clase_predicha'] for pred in predicciones))
+            
+            for diagnostico in diagnosticos_unicos:
+                info_clase = self.informacion_clases.get(diagnostico, {})
+                
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(0, 8, self.limpiar_texto_pdf(f'{info_clase.get("nombre", diagnostico)}'), 0, 1)
+                
+                pdf.set_font('Arial', '', 10)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Descripción: {info_clase.get("descripcion", "No disponible")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Gravedad: {info_clase.get("gravedad", "No especificada")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tratamiento: {info_clase.get("tratamiento", "Consultar especialista")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Pronóstico: {info_clase.get("pronostico", "Variable")}'), 0, 1)
+                pdf.ln(5)
+            
+            # --- RECOMENDACIONES TÉCNICAS ---
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('RECOMENDACIONES TÉCNICAS'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(8)
+            
+            # Ganadores por categoría
+            mejores_modelos = self.encontrar_mejor_arquitectura(predicciones)
+            
+            categorias = [
+                ('mayor_confianza', 'Mayor Confianza', 'Uso clínico de alta precisión'),
+                ('mas_rapido', 'Más Rápido', 'Aplicaciones tiempo real/móviles'),
+                ('mas_ligero', 'Más Ligero', 'Dispositivos recursos limitados'),
+                ('mas_eficiente', 'Más Eficiente', 'Sistemas de producción escalables')
+            ]
+            
+            for clave, titulo, contexto in categorias:
+                if clave in mejores_modelos:
+                    ganador = mejores_modelos[clave]
+                    info_arq = self.informacion_arquitecturas[ganador['arquitectura']]
+                    
+                    pdf.set_font('Arial', 'B', 11)
+                    pdf.cell(0, 7, self.limpiar_texto_pdf(f'{titulo}: {info_arq["nombre_completo"]}'), 0, 1)
+                    pdf.set_font('Arial', '', 10)
+                    pdf.cell(0, 5, self.limpiar_texto_pdf(f'Contexto: {contexto}'), 0, 1)
+                    
+                    if clave == 'mayor_confianza':
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Confianza: {ganador["confianza"]:.1%}'), 0, 1)
+                    elif clave == 'mas_rapido':
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tiempo: {ganador["tiempo_prediccion"]:.3f}s'), 0, 1)
+                    elif clave == 'mas_ligero':
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tamaño: {ganador["tamaño_modelo"]:.1f}MB'), 0, 1)
+                    else:
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Eficiencia: {ganador.get("eficiencia", 0):.1f}'), 0, 1)
+                    
+                    pdf.ln(3)
+            
+            # --- DISCLAIMER MÉDICO ---
+            pdf.ln(10)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('DISCLAIMER MÉDICO'), 0, 1)
+            pdf.set_font('Arial', '', 9)
+            pdf.multi_cell(0, 4, self.limpiar_texto_pdf(
+                'Este reporte es generado por un sistema de inteligencia artificial y debe ser '
+                'utilizado únicamente como herramienta de apoyo diagnóstico. No reemplaza el '
+                'criterio clínico profesional. Se recomienda confirmación por oftalmólogo '
+                'certificado antes de tomar decisiones terapéuticas.'))
+            
+            # Generar archivo PDF
+            marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo_pdf = f"reporte_diagnostico_completo_{marca_tiempo}.pdf"
+            pdf.output(nombre_archivo_pdf)
+            
+            # Limpiar archivos temporales
+            for archivo in archivos_temporales:
+                try:
+                    if os.path.exists(archivo):
+                        os.remove(archivo)
+                except:
+                    pass
+            
+            return nombre_archivo_pdf
+            
+        except Exception as e:
+            st.error(f"Error generando PDF completo: {str(e)}")
+            # Limpiar archivos temporales en caso de error
+            for archivo in archivos_temporales:
+                try:
+                    if os.path.exists(archivo):
+                        os.remove(archivo)
+                except:
+                    pass
+            return None
+        """Genera reporte PDF profesional completo"""
+        try:
+            # Crear PDF
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # --- PORTADA ---
+            pdf.set_font('Arial', 'B', 20)
+            pdf.cell(0, 15, self.limpiar_texto_pdf('REPORTE DE DIAGNÓSTICO OCULAR AVANZADO'), 0, 1, 'C')
+            pdf.ln(5)
+            
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('Sistema Multi-Arquitectura CNN'), 0, 1, 'C')
+            pdf.ln(10)
+            
+            # Información general
+            pdf.set_font('Arial', '', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Fecha del análisis: {marca_tiempo_analisis}'), 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'Arquitecturas analizadas: {len(predicciones)}'), 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('Enfermedades detectables: 10 patologías especializadas'), 0, 1)
+            pdf.ln(10)
+            
+            # --- RESUMEN EJECUTIVO ---
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('RESUMEN EJECUTIVO'), 0, 1)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+            
+            # Encontrar ganador general
+            mejor_general = max(predicciones, key=lambda x: x.get('score_general', 0))
+            info_ganador = self.informacion_arquitecturas[mejor_general['arquitectura']]
+            
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 8, self.limpiar_texto_pdf(f'ARQUITECTURA RECOMENDADA: {info_ganador["nombre_completo"]}'), 0, 1)
+            
+            pdf.set_font('Arial', '', 11)
+            clase_predicha = mejor_general['clase_predicha']
+            info_clase = self.informacion_clases.get(clase_predicha, {})
+            
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Diagnóstico principal: {info_clase.get("nombre", clase_predicha)}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Nivel de confianza: {mejor_general["confianza"]:.1%}'), 0, 1)
+            pdf.cell(0, 6, self.limpiar_texto_pdf(f'Gravedad: {info_clase.get("gravedad", "No especificada")}'), 0, 1)
             pdf.ln(8)
             
             # Agregar imagen de manera segura
@@ -1658,45 +2544,45 @@ Arquitecturas evaluadas:
                         plt.close()
                     
                     # Agregar imagen al PDF
-                    pdf.cell(0, 10, 'IMAGEN ANALIZADA:', 0, 1)
+                    pdf.cell(0, 10, self.limpiar_texto_pdf('IMAGEN ANALIZADA:'), 0, 1)
                     pdf.image(nombre_img_temp, w=80)
                     pdf.ln(5)
                     
             except Exception as error_img:
                 # Si hay error con la imagen, continuar sin ella
                 pdf.set_font('Arial', 'I', 10)
-                pdf.cell(0, 6, f'[Imagen no disponible: {str(error_img)[:50]}...]', 0, 1)
+                pdf.cell(0, 6, self.limpiar_texto_pdf(f'[Imagen no disponible: {str(error_img)[:50]}...]'), 0, 1)
                 pdf.ln(5)
             
             # --- NUEVA PÁGINA: COMPARACIÓN DE ARQUITECTURAS ---
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 12, 'COMPARACIÓN DE ARQUITECTURAS CNN', 0, 1)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('COMPARACIÓN DE ARQUITECTURAS CNN'), 0, 1)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(8)
             
             # Tabla comparativa
             pdf.set_font('Arial', 'B', 10)
-            pdf.cell(50, 8, 'Arquitectura', 1, 0, 'C')
-            pdf.cell(35, 8, 'Confianza', 1, 0, 'C')
-            pdf.cell(30, 8, 'Tiempo (ms)', 1, 0, 'C')
-            pdf.cell(25, 8, 'Tamaño (MB)', 1, 0, 'C')
-            pdf.cell(30, 8, 'Eficiencia', 1, 1, 'C')
+            pdf.cell(50, 8, self.limpiar_texto_pdf('Arquitectura'), 1, 0, 'C')
+            pdf.cell(35, 8, self.limpiar_texto_pdf('Confianza'), 1, 0, 'C')
+            pdf.cell(30, 8, self.limpiar_texto_pdf('Tiempo (ms)'), 1, 0, 'C')
+            pdf.cell(25, 8, self.limpiar_texto_pdf('Tamaño (MB)'), 1, 0, 'C')
+            pdf.cell(30, 8, self.limpiar_texto_pdf('Eficiencia'), 1, 1, 'C')
             
             pdf.set_font('Arial', '', 9)
             for pred in predicciones:
                 nombre_arq = pred['arquitectura'].replace('_', ' ')
-                pdf.cell(50, 6, nombre_arq, 1, 0)
-                pdf.cell(35, 6, f"{pred['confianza']:.1%}", 1, 0, 'C')
-                pdf.cell(30, 6, f"{pred['tiempo_prediccion']*1000:.1f}", 1, 0, 'C')
-                pdf.cell(25, 6, f"{pred['tamaño_modelo']:.1f}", 1, 0, 'C')
-                pdf.cell(30, 6, f"{pred.get('eficiencia', 0):.1f}", 1, 1, 'C')
+                pdf.cell(50, 6, self.limpiar_texto_pdf(nombre_arq), 1, 0)
+                pdf.cell(35, 6, self.limpiar_texto_pdf(f"{pred['confianza']:.1%}"), 1, 0, 'C')
+                pdf.cell(30, 6, self.limpiar_texto_pdf(f"{pred['tiempo_prediccion']*1000:.1f}"), 1, 0, 'C')
+                pdf.cell(25, 6, self.limpiar_texto_pdf(f"{pred['tamaño_modelo']:.1f}"), 1, 0, 'C')
+                pdf.cell(30, 6, self.limpiar_texto_pdf(f"{pred.get('eficiencia', 0):.1f}"), 1, 1, 'C')
             
             pdf.ln(10)
             
             # --- ANÁLISIS CLÍNICO DETALLADO ---
             pdf.set_font('Arial', 'B', 14)
-            pdf.cell(0, 10, 'ANÁLISIS CLÍNICO DETALLADO', 0, 1)
+            pdf.cell(0, 10, self.limpiar_texto_pdf('ANÁLISIS CLÍNICO DETALLADO'), 0, 1)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(5)
             
@@ -1707,19 +2593,19 @@ Arquitecturas evaluadas:
                 info_clase = self.informacion_clases.get(diagnostico, {})
                 
                 pdf.set_font('Arial', 'B', 12)
-                pdf.cell(0, 8, f'{info_clase.get("nombre", diagnostico)}', 0, 1)
+                pdf.cell(0, 8, self.limpiar_texto_pdf(f'{info_clase.get("nombre", diagnostico)}'), 0, 1)
                 
                 pdf.set_font('Arial', '', 10)
-                pdf.cell(0, 5, f'Descripción: {info_clase.get("descripcion", "No disponible")}', 0, 1)
-                pdf.cell(0, 5, f'Gravedad: {info_clase.get("gravedad", "No especificada")}', 0, 1)
-                pdf.cell(0, 5, f'Tratamiento: {info_clase.get("tratamiento", "Consultar especialista")}', 0, 1)
-                pdf.cell(0, 5, f'Pronóstico: {info_clase.get("pronostico", "Variable")}', 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Descripción: {info_clase.get("descripcion", "No disponible")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Gravedad: {info_clase.get("gravedad", "No especificada")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tratamiento: {info_clase.get("tratamiento", "Consultar especialista")}'), 0, 1)
+                pdf.cell(0, 5, self.limpiar_texto_pdf(f'Pronóstico: {info_clase.get("pronostico", "Variable")}'), 0, 1)
                 pdf.ln(5)
             
             # --- RECOMENDACIONES TÉCNICAS ---
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 12, 'RECOMENDACIONES TÉCNICAS', 0, 1)
+            pdf.cell(0, 12, self.limpiar_texto_pdf('RECOMENDACIONES TÉCNICAS'), 0, 1)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(8)
             
@@ -1739,31 +2625,31 @@ Arquitecturas evaluadas:
                     info_arq = self.informacion_arquitecturas[ganador['arquitectura']]
                     
                     pdf.set_font('Arial', 'B', 11)
-                    pdf.cell(0, 7, f'{titulo}: {info_arq["nombre_completo"]}', 0, 1)
+                    pdf.cell(0, 7, self.limpiar_texto_pdf(f'{titulo}: {info_arq["nombre_completo"]}'), 0, 1)
                     pdf.set_font('Arial', '', 10)
-                    pdf.cell(0, 5, f'Contexto: {contexto}', 0, 1)
+                    pdf.cell(0, 5, self.limpiar_texto_pdf(f'Contexto: {contexto}'), 0, 1)
                     
                     if clave == 'mayor_confianza':
-                        pdf.cell(0, 5, f'Confianza: {ganador["confianza"]:.1%}', 0, 1)
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Confianza: {ganador["confianza"]:.1%}'), 0, 1)
                     elif clave == 'mas_rapido':
-                        pdf.cell(0, 5, f'Tiempo: {ganador["tiempo_prediccion"]:.3f}s', 0, 1)
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tiempo: {ganador["tiempo_prediccion"]:.3f}s'), 0, 1)
                     elif clave == 'mas_ligero':
-                        pdf.cell(0, 5, f'Tamaño: {ganador["tamaño_modelo"]:.1f}MB', 0, 1)
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Tamaño: {ganador["tamaño_modelo"]:.1f}MB'), 0, 1)
                     else:
-                        pdf.cell(0, 5, f'Eficiencia: {ganador.get("eficiencia", 0):.1f}', 0, 1)
+                        pdf.cell(0, 5, self.limpiar_texto_pdf(f'Eficiencia: {ganador.get("eficiencia", 0):.1f}'), 0, 1)
                     
                     pdf.ln(3)
             
             # --- DISCLAIMER MÉDICO ---
             pdf.ln(10)
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'DISCLAIMER MÉDICO', 0, 1)
+            pdf.cell(0, 8, self.limpiar_texto_pdf('DISCLAIMER MÉDICO'), 0, 1)
             pdf.set_font('Arial', '', 9)
-            pdf.multi_cell(0, 4, 
+            pdf.multi_cell(0, 4, self.limpiar_texto_pdf(
                 'Este reporte es generado por un sistema de inteligencia artificial y debe ser '
                 'utilizado únicamente como herramienta de apoyo diagnóstico. No reemplaza el '
                 'criterio clínico profesional. Se recomienda confirmación por oftalmólogo '
-                'certificado antes de tomar decisiones terapéuticas.')
+                'certificado antes de tomar decisiones terapéuticas.'))
             
             # Generar archivo PDF
             marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1887,16 +2773,16 @@ Arquitecturas evaluadas:
             return None
     
     def mostrar_seccion_reportes_avanzados(self, predicciones, imagen, marca_tiempo_analisis):
-        """Sección avanzada de reportes y exportación"""
+        """Sección avanzada de reportes y exportación - TRADUCIDA"""
         st.markdown("---")
-        st.header("📋 SISTEMA AVANZADO DE REPORTES")
+        st.header(get_text('advanced_reports_title', self.lang))
         
         # Métricas de cobertura del sistema
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.metric(
-                label="🏥 Enfermedades Detectables",
+                label=get_text('detectable_diseases', self.lang),
                 value="10",
                 delta="6 más que sistemas básicos",
                 help="Nuestro sistema detecta 10 vs 4 de sistemas convencionales"
@@ -1904,7 +2790,7 @@ Arquitecturas evaluadas:
         
         with col2:
             st.metric(
-                label="🧠 Arquitecturas CNN",
+                label=get_text('cnn_architectures', self.lang),
                 value=len(predicciones),
                 delta="Análisis multi-arquitectura",
                 help="Comparación simultánea de múltiples modelos"
@@ -1913,7 +2799,7 @@ Arquitecturas evaluadas:
         with col3:
             diagnosticos_unicos = len(set(pred['clase_predicha'] for pred in predicciones))
             st.metric(
-                label="🎯 Diagnósticos Únicos",
+                label=get_text('unique_diagnoses', self.lang),
                 value=diagnosticos_unicos,
                 delta="En este análisis",
                 help="Número de diagnósticos diferentes detectados"
@@ -1922,32 +2808,32 @@ Arquitecturas evaluadas:
         with col4:
             confianza_promedio = np.mean([pred['confianza'] for pred in predicciones])
             st.metric(
-                label="📊 Confianza Promedio",
+                label=get_text('average_confidence', self.lang),
                 value=f"{confianza_promedio:.1%}",
                 delta=f"±{np.std([pred['confianza'] for pred in predicciones]):.1%}",
                 help="Confianza promedio entre todas las arquitecturas"
             )
         
         # Sección de exportación
-        st.markdown("### 📤 Exportar Análisis")
+        st.markdown(f"### {get_text('export_analysis', self.lang)}")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📄 Generar Reporte PDF Completo", type="primary", use_container_width=True, key="boton_pdf"):
+            if st.button(get_text('generate_pdf', self.lang), type="primary", use_container_width=True, key="boton_pdf"):
                 try:
                     estado_pdf = st.empty()
-                    estado_pdf.info("🔄 Generando reporte PDF profesional...")
+                    estado_pdf.info(get_text('generating_pdf', self.lang))
                     archivo_pdf = self.generar_reporte_pdf_completo(predicciones, imagen, marca_tiempo_analisis)
                     
                     if archivo_pdf and os.path.exists(archivo_pdf):
-                        estado_pdf.success("✅ PDF generado exitosamente!")
+                        estado_pdf.success(get_text('pdf_generated', self.lang))
                         
                         with open(archivo_pdf, "rb") as f:
                             bytes_pdf = f.read()
                         
                         st.download_button(
-                            label="⬇️ DESCARGAR REPORTE PDF",
+                            label=get_text('download_pdf', self.lang),
                             data=bytes_pdf,
                             file_name=f"reporte_diagnostico_ocular_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                             mime="application/pdf",
@@ -1962,27 +2848,27 @@ Arquitecturas evaluadas:
                         except:
                             pass
                     else:
-                        st.error("❌ Error generando el reporte PDF")
+                        st.error(get_text('pdf_error', self.lang))
                         
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
         with col2:
-            if st.button("📊 Exportar Datos Técnicos (JSON)", use_container_width=True, key="boton_json"):
+            if st.button(get_text('export_json', self.lang), use_container_width=True, key="boton_json"):
                 try:
                     estado_json = st.empty()
-                    estado_json.info("🔄 Exportando datos técnicos...")
+                    estado_json.info(get_text('exporting_data', self.lang))
                     
                     archivo_json = self.exportar_datos_tecnicos(predicciones, marca_tiempo_analisis)
                     
                     if archivo_json and os.path.exists(archivo_json):
-                        estado_json.success("✅ Datos técnicos exportados!")
+                        estado_json.success(get_text('data_exported', self.lang))
                         
                         with open(archivo_json, "r", encoding='utf-8') as f:
                             datos_json = f.read()
                         
                         st.download_button(
-                            label="⬇️ DESCARGAR DATOS JSON",
+                            label=get_text('download_json', self.lang),
                             data=datos_json,
                             file_name=f"analisis_tecnico_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                             mime="application/json",
@@ -1995,39 +2881,39 @@ Arquitecturas evaluadas:
                         except:
                             pass
                     else:
-                        st.error("❌ Error exportando datos técnicos")
+                        st.error(get_text('data_error', self.lang))
                         
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
         with col3:
-            if st.button("📈 Exportar CSV Comparativo", use_container_width=True, key="boton_csv"):
+            if st.button(get_text('export_csv', self.lang), use_container_width=True, key="boton_csv"):
                 try:
                     estado_csv = st.empty()
-                    estado_csv.info("🔄 Preparando CSV...")
+                    estado_csv.info(get_text('preparing_csv', self.lang))
                     
                     df_exportar = pd.DataFrame([
                         {
                             'Marca_Tiempo': marca_tiempo_analisis,
-                            'Arquitectura': pred['arquitectura'].replace('_', ' '),
-                            'Diagnóstico': pred['clase_predicha'],
-                            'Diagnóstico_ES': self.informacion_clases.get(pred['clase_predicha'], {}).get('nombre', pred['clase_predicha']),
-                            'Confianza': pred['confianza'],
-                            'Tiempo_ms': pred['tiempo_prediccion'] * 1000,
-                            'Tamaño_MB': pred['tamaño_modelo'],
-                            'Parámetros': pred['conteo_parametros'],
-                            'Eficiencia': pred.get('eficiencia', 0),
-                            'Score_General': pred.get('score_general', 0),
-                            'Gravedad': self.informacion_clases.get(pred['clase_predicha'], {}).get('gravedad', 'No especificada')
+                            get_text('architecture', self.lang): pred['arquitectura'].replace('_', ' '),
+                            get_text('diagnosis_en', self.lang): pred['clase_predicha'],
+                            get_text('diagnosis_es', self.lang): self.informacion_clases.get(pred['clase_predicha'], {}).get('nombre', pred['clase_predicha']),
+                            get_text('confidence_table', self.lang): pred['confianza'],
+                            f"{get_text('time_table', self.lang)}_ms": pred['tiempo_prediccion'] * 1000,
+                            f"{get_text('size_table', self.lang)}_MB": pred['tamaño_modelo'],
+                            get_text('parameters_table', self.lang): pred['conteo_parametros'],
+                            get_text('efficiency_table', self.lang): pred.get('eficiencia', 0),
+                            get_text('general_score_table', self.lang): pred.get('score_general', 0),
+                            get_text('severity', self.lang): self.informacion_clases.get(pred['clase_predicha'], {}).get('gravedad', 'No especificada')
                         }
                         for pred in predicciones
                     ])
                     
                     datos_csv = df_exportar.to_csv(index=False, encoding='utf-8')
-                    estado_csv.success("✅ CSV listo!")
+                    estado_csv.success(get_text('csv_ready', self.lang))
                     
                     st.download_button(
-                        label="⬇️ DESCARGAR CSV",
+                        label=get_text('download_csv', self.lang),
                         data=datos_csv,
                         file_name=f"analisis_comparativo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
@@ -2040,18 +2926,46 @@ Arquitecturas evaluadas:
         
         # Información adicional sobre las descargas
         st.markdown("---")
-        st.info("""
-        💡 **Información sobre las descargas:**
-        - **PDF**: Reporte completo con análisis clínico y recomendaciones técnicas
-        - **JSON**: Datos técnicos estructurados para análisis posterior 
-        - **CSV**: Tabla comparativa simple para Excel/análisis estadístico
-        
-        📁 Los archivos se descargan automáticamente a tu carpeta de Descargas
-        """)
+        st.info(get_text('download_info', self.lang))
     
-    # ========== FUNCIÓN EJECUTAR PRINCIPAL (MODIFICADA) ==========
+    def encontrar_mejor_arquitectura(self, predicciones):
+        """Encuentra la mejor arquitectura por diferentes métricas"""
+        if not predicciones or len(predicciones) < 2:
+            return {}
+        
+        # Mejor por confianza
+        mejor_confianza = max(predicciones, key=lambda x: x['confianza'])
+        
+        # Más rápido
+        mas_rapido = min(predicciones, key=lambda x: x['tiempo_prediccion'])
+        
+        # Más eficiente (mayor confianza / tiempo)
+        for pred in predicciones:
+            pred['eficiencia'] = pred['confianza'] / pred['tiempo_prediccion']
+        mas_eficiente = max(predicciones, key=lambda x: x['eficiencia'])
+        
+        # Más ligero
+        mas_ligero = min(predicciones, key=lambda x: x['tamaño_modelo'])
+        
+        return {
+            'mayor_confianza': mejor_confianza,
+            'mas_rapido': mas_rapido,
+            'mas_eficiente': mas_eficiente,
+            'mas_ligero': mas_ligero
+        }
+
+    def mostrar_encabezado(self):
+        """Header de la aplicación - TRADUCIDO"""
+        st.title(get_text('main_title', self.lang))
+        st.subheader(get_text('page_subtitle', self.lang))
+        st.markdown("---")
+
+    # ========== FUNCIÓN EJECUTAR PRINCIPAL (MODIFICADA PARA MULTILENGUAJE) ==========
     def ejecutar(self):
-        """Ejecuta la aplicación principal CON ANÁLISIS ESTADÍSTICO"""
+        """Ejecuta la aplicación principal CON MULTILENGUAJE COMPLETO"""
+        # Reinicializar datos con el nuevo idioma
+        self.__init__()
+        
         # Inicializar session state
         if 'analisis_completado' not in st.session_state:
             st.session_state.analisis_completado = False
@@ -2068,27 +2982,30 @@ Arquitecturas evaluadas:
         self.mostrar_encabezado()
         
         # Sidebar
-        st.sidebar.markdown("## 🎛️ Panel de Control")
+        st.sidebar.markdown(f"## {get_text('sidebar_title', self.lang)}")
         st.sidebar.markdown("---")
         
         # Cargar modelos
         if self.modelos is None:
-            with st.spinner("🔄 Cargando las 3 arquitecturas..."):
+            with st.spinner(get_text('loading_models', self.lang)):
                 self.modelos, self.nombres_clases, self.nombres_clases_individuales = self.cargar_modelos()
         
         if len(self.modelos) < 2:
-            st.error("❌ Se necesitan al menos 2 modelos para comparar")
+            st.error(get_text('models_error', self.lang))
             st.stop()
         
         # Info en sidebar
-        st.sidebar.success(f"✅ {len(self.modelos)} arquitecturas cargadas")
+        st.sidebar.success(get_text('models_loaded', self.lang, count=len(self.modelos)))
         
         # Pestañas principales
-        tab1, tab2 = st.tabs(["🔬 Análisis Individual", "📊 Evaluación Estadística"])
+        tab1, tab2 = st.tabs([
+            get_text('tab_individual', self.lang), 
+            get_text('tab_statistical', self.lang)
+        ])
         
         with tab1:
             # Botón para limpiar análisis
-            if st.sidebar.button("🔄 Nuevo Análisis", help="Limpia el análisis actual"):
+            if st.sidebar.button(get_text('new_analysis', self.lang), help=get_text('new_analysis_help', self.lang)):
                 st.session_state.analisis_completado = False
                 st.session_state.predicciones = None
                 st.session_state.imagen_analisis = None
@@ -2102,13 +3019,13 @@ Arquitecturas evaluadas:
             
             # Si ya hay un análisis completo, mostrar resultados
             if st.session_state.analisis_completado and st.session_state.predicciones:
-                st.success("🎉 **Análisis ya completado!** Puedes descargar los reportes o hacer un nuevo análisis.")
+                st.success(get_text('analysis_completed', self.lang))
                 
                 # Mostrar imagen analizada
                 if st.session_state.imagen_analisis:
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
-                        st.image(st.session_state.imagen_analisis, caption="Imagen analizada", use_container_width=True)
+                        st.image(st.session_state.imagen_analisis, caption=get_text('analyzed_image', self.lang), use_container_width=True)
                 
                 # Mostrar todos los resultados usando el estado guardado
                 predicciones = st.session_state.predicciones
@@ -2129,19 +3046,19 @@ Arquitecturas evaluadas:
                 self.mostrar_seccion_reportes_avanzados(predicciones, st.session_state.imagen_analisis, st.session_state.marca_tiempo_analisis)
                 
                 # Tabla resumen
-                with st.expander("📊 Tabla Resumen de Métricas"):
+                with st.expander(get_text('summary_table', self.lang)):
                     df_resumen = pd.DataFrame([
                         {
-                            'Arquitectura': pred['arquitectura'].replace('_', ' '),
-                            'Diagnóstico': pred['clase_predicha'],
-                            'Diagnóstico_ES': self.informacion_clases.get(pred['clase_predicha'], {}).get('nombre', pred['clase_predicha']),
-                            'Confianza': f"{pred['confianza']:.1%}",
-                            'Tiempo': f"{pred['tiempo_prediccion']:.3f}s",
-                            'Tamaño': f"{pred['tamaño_modelo']:.1f}MB",
-                            'Parámetros': f"{pred['conteo_parametros']:,}",
-                            'Eficiencia': f"{pred.get('eficiencia', 0):.1f}",
-                            'Score General': f"{pred.get('score_general', 0):.3f}",
-                            'Gravedad': self.informacion_clases.get(pred['clase_predicha'], {}).get('gravedad', 'No especificada')
+                            get_text('architecture', self.lang): pred['arquitectura'].replace('_', ' '),
+                            get_text('diagnosis_en', self.lang): pred['clase_predicha'],
+                            get_text('diagnosis_es', self.lang): self.informacion_clases.get(pred['clase_predicha'], {}).get('nombre', pred['clase_predicha']),
+                            get_text('confidence_table', self.lang): f"{pred['confianza']:.1%}",
+                            get_text('time_table', self.lang): f"{pred['tiempo_prediccion']:.3f}s",
+                            get_text('size_table', self.lang): f"{pred['tamaño_modelo']:.1f}MB",
+                            get_text('parameters_table', self.lang): f"{pred['conteo_parametros']:,}",
+                            get_text('efficiency_table', self.lang): f"{pred.get('eficiencia', 0):.1f}",
+                            get_text('general_score_table', self.lang): f"{pred.get('score_general', 0):.3f}",
+                            get_text('severity', self.lang): self.informacion_clases.get(pred['clase_predicha'], {}).get('gravedad', get_text('unspecified', self.lang))
                         }
                         for pred in predicciones
                     ])
@@ -2150,15 +3067,15 @@ Arquitecturas evaluadas:
                 
                 # Timestamp
                 st.markdown("---")
-                st.markdown(f"📅 Análisis realizado: {st.session_state.marca_tiempo_analisis}")
+                st.markdown(get_text('analysis_timestamp', self.lang, timestamp=st.session_state.marca_tiempo_analisis))
                 
             else:
                 # Interfaz para nuevo análisis
-                st.markdown("## 📸 Subir Imagen para Comparar Arquitecturas")
+                st.markdown(f"## {get_text('upload_title', self.lang)}")
                 archivo_subido = st.file_uploader(
-                    "Selecciona una imagen de retina para la batalla de arquitecturas",
+                    get_text('upload_help', self.lang),
                     type=['png', 'jpg', 'jpeg'],
-                    help="La imagen será analizada por las 3 arquitecturas simultáneamente"
+                    help=get_text('upload_description', self.lang)
                 )
                 
                 if archivo_subido is not None:
@@ -2166,21 +3083,21 @@ Arquitecturas evaluadas:
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
                         imagen = Image.open(archivo_subido)
-                        st.image(imagen, caption="Imagen para la batalla", use_container_width=True)
+                        st.image(imagen, caption=get_text('image_caption', self.lang), use_container_width=True)
                     
                     # Botón de análisis
-                    if st.button("🚀 INICIAR BATALLA DE ARQUITECTURAS", type="primary", use_container_width=True):
+                    if st.button(get_text('battle_button', self.lang), type="primary", use_container_width=True):
                         
                         marca_tiempo_analisis = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         
                         # Preprocesamiento y predicciones
-                        with st.spinner("🔄 Procesando imagen para todas las arquitecturas..."):
+                        with st.spinner(get_text('processing_image', self.lang)):
                             array_img = self.preprocesar_imagen(imagen)
                         
                         if array_img is not None:
                             predicciones = []
                             
-                            with st.spinner("🏗️ Analizando con las 3 arquitecturas..."):
+                            with st.spinner(get_text('analyzing_architectures', self.lang)):
                                 barra_progreso = st.progress(0)
                                 
                                 for i, (nombre_arq, modelo) in enumerate(self.modelos.items()):
@@ -2190,7 +3107,7 @@ Arquitecturas evaluadas:
                                     barra_progreso.progress((i + 1) / len(self.modelos))
                             
                             if len(predicciones) >= 2:
-                                st.success("✅ ¡Batalla completada! Analizando resultados...")
+                                st.success(get_text('battle_completed', self.lang))
                                 
                                 # Calcular scores adicionales
                                 for pred in predicciones:
@@ -2215,63 +3132,65 @@ Arquitecturas evaluadas:
                                 st.rerun()
                             
                             else:
-                                st.error("❌ Error en las predicciones")
+                                st.error(get_text('prediction_error', self.lang))
         
         with tab2:
             # NUEVA PESTAÑA: ANÁLISIS ESTADÍSTICO
             self.mostrar_seccion_analisis_estadistico()
         
-        # Footer técnico (expandido)
+        # Footer técnico (expandido) - TRADUCIDO
         st.markdown("---")
-        st.markdown("""
-        ### ⚙️ Sobre Este Sistema Avanzado con Análisis Estadístico
+        st.markdown(f"""
+        ### {get_text('system_title', self.lang)}
         
-        **🚀 Sistema de Diagnóstico Ocular de Nueva Generación**
+        **{get_text('system_subtitle', self.lang)}**
         
-        **🔬 Nuevas Funcionalidades Estadísticas:**
-        - **📊 Coeficiente de Matthews (MCC)**: Métrica balanceada para clases desbalanceadas
-        - **🔬 Prueba de McNemar**: Comparación estadística rigurosa entre modelos
-        - **📈 Intervalos de Confianza Bootstrap**: Robustez estadística (95% CI)
-        - **🎭 Matrices de Confusión**: Análisis detallado por clase
-        - **📋 Reportes Estadísticos**: Exportación completa de resultados
+        **{get_text('statistical_features_title', self.lang)}**
+        - {get_text('mcc_description', self.lang)}
+        - {get_text('mcnemar_description', self.lang)}
+        - {get_text('bootstrap_description', self.lang)}
+        - {get_text('confusion_matrices', self.lang)}
+        - {get_text('statistical_reports', self.lang)}
         
-        **🔬 Ventajas Competitivas:**
-        - **10 enfermedades especializadas** vs 4 básicas de sistemas convencionales
-        - **Análisis multi-arquitectura** con comparación simultánea de CNNs
-        - **Evaluación estadística rigurosa** con pruebas de significancia
-        - **Reportes profesionales PDF** con análisis clínico y estadístico
-        - **Exportación técnica completa** (JSON, CSV, TXT) para investigación
-        - **Recomendaciones contextuales** basadas en evidencia estadística
+        **{get_text('competitive_advantages_title', self.lang)}**
+        - {get_text('specialized_diseases', self.lang)}
+        - {get_text('multi_architecture', self.lang)}
+        - {get_text('statistical_evaluation', self.lang)}
+        - {get_text('professional_reports', self.lang)}
+        - {get_text('complete_export', self.lang)}
+        - {get_text('contextual_recommendations', self.lang)}
         
-        **🏗️ Arquitecturas Implementadas:**
-        - **🧠 CNN Híbrida (MobileNetV2)**: Transfer Learning especializado
-        - **⚡ EfficientNet-B0**: Compound Scaling balanceado
-        - **🔗 ResNet-50 V2**: Conexiones residuales profundas
+        **{get_text('implemented_architectures_title', self.lang)}**
+        - {get_text('hybrid_cnn', self.lang)}
+        - {get_text('efficientnet_desc', self.lang)}
+        - {get_text('resnet_desc', self.lang)}
         
-        **📊 Métricas Evaluadas:**
-        - 🎯 **Precisión**: Confianza, MCC y consenso diagnóstico
-        - ⚡ **Velocidad**: Tiempo de inferencia optimizado
-        - 💾 **Eficiencia**: Uso de memoria y escalabilidad
-        - 🏆 **Balance**: Score general multi-criterio
-        - 📈 **Significancia**: Pruebas estadísticas inferenciales
+        **{get_text('evaluated_metrics_title', self.lang)}**
+        - {get_text('precision_metric', self.lang)}
+        - {get_text('speed_metric', self.lang)}
+        - {get_text('efficiency_metric', self.lang)}
+        - {get_text('balance_metric', self.lang)}
+        - {get_text('significance_metric', self.lang)}
         
-        **🎯 Aplicaciones:**
-        - 🏥 **Clínicas**: Diagnóstico de alta precisión con validación estadística
-        - 📱 **Móviles**: Apps de telemedicina con métricas robustas
-        - 🔄 **Producción**: Sistemas hospitalarios escalables con evidencia estadística
-        - 🔬 **Investigación**: Datos completos para publicaciones científicas
+        **{get_text('applications_title', self.lang)}**
+        - {get_text('clinical_application', self.lang)}
+        - {get_text('mobile_application', self.lang)}
+        - {get_text('production_application', self.lang)}
+        - {get_text('research_application', self.lang)}
         
-        **💡 Innovación**: Primer sistema que combina múltiples arquitecturas CNN con 
-        análisis estadístico inferencial completo para diagnóstico ocular especializado.
+        {get_text('innovation_text', self.lang)}
         
-        **📚 Métodos Estadísticos:**
-        - **MCC**: Coeficiente de Correlación de Matthews para métricas balanceadas
-        - **McNemar**: Prueba chi-cuadrado para comparación de clasificadores
-        - **Bootstrap**: Intervalos de confianza no paramétricos
-        - **Corrección de Yates**: Para muestras pequeñas en McNemar
+        **{get_text('statistical_methods_title', self.lang)}**
+        - {get_text('mcc_method', self.lang)}
+        - {get_text('mcnemar_method', self.lang)}
+        - {get_text('bootstrap_method', self.lang)}
+        - {get_text('yates_correction', self.lang)}
         """)
 
-# Ejecutar aplicación
 if __name__ == "__main__":
+    configurar_pagina("es")              # Evita usar `st` antes de esto
+    lang = mostrar_selector_idioma()     # Selector de idioma una sola vez
+
     aplicacion = AplicacionTresArquitecturas()
+    aplicacion.lang = lang               # Asigna el idioma seleccionado
     aplicacion.ejecutar()
